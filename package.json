@@ -1,0 +1,35 @@
+{
+  "name": "mpc-discord-thumbnail",
+  "version": "1.0.0",
+  "description": "MPC-HC Discord Rich Presence with live thumbnails via Imgur",
+  "main": "dist/index.js",
+  "scripts": {
+    "start": "pm2 start dist/index.js --name mpc-discord",
+    "stop": "pm2 stop mpc-discord",
+    "restart": "pm2 restart mpc-discord",
+    "logs": "pm2 logs mpc-discord",
+    "status": "pm2 status",
+    "dev": "npx ts-node src/index.ts",
+    "build": "tsc",
+    "postinstall": "npm run build"
+  },
+  "keywords": [
+    "mpc-hc",
+    "discord",
+    "rich-presence",
+    "imgur"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@xhayper/discord-rpc": "^1.2.0",
+    "axios": "^1.7.9",
+    "dotenv": "^16.4.7",
+    "form-data": "^4.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "pm2": "^5.4.3",
+    "typescript": "^5.7.2"
+  }
+}
