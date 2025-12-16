@@ -40,12 +40,27 @@ export function calculateHash(buffer: Buffer): string {
 
 /**
  * Limpia el nombre del archivo para mostrarlo
+ * Ejemplo: "[Erai-raws] Chitose-kun wa Ramune Bin no Naka - 08 [1080p CR WEB-DL AVC AAC][MultiSub][0B350900].mkv"
+ * Resultado: "Chitose-kun wa Ramune Bin no Naka - 08"
  */
 export function cleanFilename(filename: string): string {
   // Remover extensión
-  const withoutExt = filename.replace(/\.[^/.]+$/, '');
-  // Reemplazar puntos y guiones bajos por espacios
-  const cleaned = withoutExt.replace(/[._]/g, ' ');
-  // Limitar longitud
-  return cleaned.length > 50 ? cleaned.substring(0, 47) + '...' : cleaned;
+  let cleaned = filename.replace(/\.[^/.]+$/, '');
+
+  // Remover grupo/fansub al inicio: [Erai-raws], [SubsPlease], etc.
+  cleaned = cleaned.replace(/^\[[^\]]+\]\s*/, '');
+
+  // Remover tags técnicos al final: [1080p...], [MultiSub], [hash], (1080p), etc.
+  // Repetir hasta que no haya más tags
+  let previous = '';
+  while (previous !== cleaned) {
+    previous = cleaned;
+    cleaned = cleaned.replace(/\s*[\[\(][^\[\]()]*[\]\)]\s*$/, '');
+  }
+
+  // Limpiar espacios extra
+  cleaned = cleaned.trim();
+
+  // Limitar longitud para Discord (128 chars max para details)
+  return cleaned.length > 100 ? cleaned.substring(0, 97) + '...' : cleaned;
 }
