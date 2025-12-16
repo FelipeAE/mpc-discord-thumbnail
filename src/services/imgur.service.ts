@@ -22,24 +22,30 @@ export class ImgurService {
 
   /**
    * Sube una imagen a Imgur (respetando el intervalo mínimo)
+   * @param imageBuffer - Buffer de la imagen a subir
+   * @param forceUpload - Si es true, ignora el intervalo y sube inmediatamente
    * @returns URL de la imagen o null si hay error
    */
-  async upload(imageBuffer: Buffer): Promise<string | null> {
+  async upload(imageBuffer: Buffer, forceUpload: boolean = false): Promise<string | null> {
     const now = Date.now();
     const timeSinceLastUpload = now - this.lastUploadTime;
 
-    // Si ya tenemos una URL y no ha pasado el intervalo, reutilizar
-    if (this.lastUrl && timeSinceLastUpload < this.uploadInterval) {
+    // Si ya tenemos una URL, no es forzado, y no ha pasado el intervalo, reutilizar
+    if (!forceUpload && this.lastUrl && timeSinceLastUpload < this.uploadInterval) {
       const remainingSecs = Math.ceil((this.uploadInterval - timeSinceLastUpload) / 1000);
       Logger.debug(`Reutilizando imagen anterior (próxima subida en ${remainingSecs}s)`);
       return this.lastUrl;
     }
 
-    // Verificar si la imagen cambió (optimización adicional)
+    // Verificar si la imagen cambió (optimización adicional, solo si no es forzado)
     const currentHash = calculateHash(imageBuffer);
-    if (currentHash === this.lastHash && this.lastUrl) {
+    if (!forceUpload && currentHash === this.lastHash && this.lastUrl) {
       Logger.debug('Imagen sin cambios, reutilizando URL anterior');
       return this.lastUrl;
+    }
+
+    if (forceUpload) {
+      Logger.info('Subida forzada: detectado cambio de archivo');
     }
 
     try {
@@ -55,7 +61,7 @@ export class ImgurService {
             Authorization: `Client-ID ${this.clientId}`,
             ...form.getHeaders()
           },
-          timeout: 30000
+          timeout: 60000 // Aumentado a 60 segundos
         }
       );
 
@@ -80,5 +86,14 @@ export class ImgurService {
    */
   getLastUrl(): string {
     return this.lastUrl;
+  }
+
+  /**
+   * Resetea el estado (útil cuando cambia el archivo)
+   */
+  reset(): void {
+    this.lastHash = '';
+    this.lastUrl = '';
+    this.lastUploadTime = 0;
   }
 }

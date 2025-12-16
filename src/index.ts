@@ -2,13 +2,18 @@ import { loadConfig } from './config';
 import { MpcHcService } from './services/mpc-hc.service';
 import { ImgurService } from './services/imgur.service';
 import { DiscordService } from './services/discord.service';
+import { ImageService } from './services/image.service';
 import { cleanFilename } from './utils/helpers';
 import Logger from './utils/logger';
 
 let mpcService: MpcHcService;
 let imgurService: ImgurService;
 let discordService: DiscordService;
+let imageService: ImageService;
 let updateInterval: NodeJS.Timeout | null = null;
+
+// Para detectar cambio de archivo
+let lastFile: string = '';
 
 async function updateLoop(): Promise<void> {
   const status = await mpcService.getStatus();
@@ -19,13 +24,23 @@ async function updateLoop(): Promise<void> {
     return;
   }
 
+  // Detectar cambio de archivo
+  const fileChanged = status.file !== lastFile && status.file !== '';
+  if (fileChanged) {
+    Logger.info(`Cambio de archivo detectado: ${cleanFilename(status.file)}`);
+    lastFile = status.file;
+  }
+
   if (status.state === 'playing') {
     // Capturar snapshot
     const snapshot = await mpcService.getSnapshot();
 
     let imageUrl: string | undefined;
     if (snapshot) {
-      const url = await imgurService.upload(snapshot);
+      // Comprimir imagen antes de subir
+      const compressed = await imageService.compress(snapshot);
+      // Subir (forzar si cambió el archivo)
+      const url = await imgurService.upload(compressed, fileChanged);
       if (url) imageUrl = url;
     }
 
@@ -73,8 +88,10 @@ async function main(): Promise<void> {
   mpcService = new MpcHcService(config.mpc.host, config.mpc.port);
   imgurService = new ImgurService(config.imgur.clientId, config.imgur.uploadInterval);
   discordService = new DiscordService(config.discord.clientId);
+  imageService = new ImageService(640, 80); // 640px ancho, 80% calidad
 
   Logger.info(`Imgur: subida cada ${config.imgur.uploadInterval / 1000} segundos`);
+  Logger.info('Compresión de imagen: 640px, calidad 80%');
 
   // Verificar conexión con MPC-HC
   const mpcConnected = await mpcService.isConnected();

@@ -25,10 +25,12 @@
     "@xhayper/discord-rpc": "^1.2.0",
     "axios": "^1.7.9",
     "dotenv": "^16.4.7",
-    "form-data": "^4.0.1"
+    "form-data": "^4.0.1",
+    "sharp": "^0.34.5"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
+    "@types/sharp": "^0.31.1",
     "pm2": "^5.4.3",
     "typescript": "^5.7.2"
   }
