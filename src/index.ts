@@ -14,6 +14,9 @@ let updateInterval: NodeJS.Timeout | null = null;
 
 // Para detectar cambio de archivo
 let lastFile: string = '';
+// Para refrescar imagen cuando está pausado
+let pausedSinceTime: number = 0;
+const PAUSED_REFRESH_INTERVAL = 120000; // Refrescar imagen cada 2 minutos si está pausado
 
 async function updateLoop(): Promise<void> {
   const status = await mpcService.getStatus();
@@ -32,6 +35,9 @@ async function updateLoop(): Promise<void> {
   }
 
   if (status.state === 'playing') {
+    // Reset paused timer cuando está reproduciendo
+    pausedSinceTime = 0;
+    
     // Capturar snapshot
     const snapshot = await mpcService.getSnapshot();
 
@@ -54,15 +60,38 @@ async function updateLoop(): Promise<void> {
 
     Logger.info(`Reproduciendo: ${cleanFilename(status.file)} [${status.positionString}]`);
   } else if (status.state === 'paused') {
-    // Usar la última imagen subida cuando está pausado
-    const lastImageUrl = imgurService.getLastUrl();
+    const now = Date.now();
+    let lastImageUrl = imgurService.getLastUrl();
+    
+    // Iniciar timer de pausa si no está iniciado
+    if (pausedSinceTime === 0) {
+      pausedSinceTime = now;
+    }
+    
+    // Refrescar imagen si lleva mucho tiempo pausado o no hay imagen
+    const pausedDuration = now - pausedSinceTime;
+    const needsRefresh = !lastImageUrl || pausedDuration >= PAUSED_REFRESH_INTERVAL;
+    
+    if (needsRefresh) {
+      const snapshot = await mpcService.getSnapshot();
+      if (snapshot) {
+        const compressed = await imageService.compress(snapshot);
+        const url = await imgurService.upload(compressed, true); // Forzar subida
+        if (url) {
+          lastImageUrl = url;
+          pausedSinceTime = now; // Reset timer después de refrescar
+          Logger.debug('Imagen refrescada durante pausa');
+        }
+      }
+    }
+    
     await discordService.setActivity({
       details: cleanFilename(status.file),
       state: `Pausado - ${status.positionString} / ${status.durationString}`,
       largeImageKey: lastImageUrl || undefined,
       largeImageText: status.file
     });
-    Logger.info(`Pausado: ${cleanFilename(status.file)}`);
+    Logger.info(`Pausado: ${cleanFilename(status.file)}${lastImageUrl ? '' : ' [SIN IMAGEN]'}`);
   } else {
     await discordService.clearActivity();
     Logger.debug('Detenido');
