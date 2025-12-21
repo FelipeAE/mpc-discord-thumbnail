@@ -32,14 +32,18 @@ export class DiscordService {
   }
 
   /**
-   * Conecta al cliente de Discord
+   * Conecta al cliente de Discord con timeout
    */
   async connect(): Promise<boolean> {
     try {
-      await this.client.login();
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('Timeout conectando a Discord')), 5000);
+      });
+      await Promise.race([this.client.login(), timeoutPromise]);
       return true;
     } catch (error) {
       Logger.error('Error al conectar con Discord', error as Error);
+      this.connected = false;
       return false;
     }
   }
@@ -50,7 +54,10 @@ export class DiscordService {
   async setActivity(options: ActivityOptions): Promise<void> {
     if (!this.connected) {
       Logger.debug('Discord no conectado, intentando reconectar...');
-      await this.connect();
+      const reconnected = await this.connect();
+      if (!reconnected) {
+        return; // No bloquear si no puede reconectar
+      }
     }
 
     try {
@@ -65,6 +72,7 @@ export class DiscordService {
       });
     } catch (error) {
       Logger.error('Error al establecer actividad', error as Error);
+      this.connected = false; // Marcar como desconectado para reintentar
     }
   }
 

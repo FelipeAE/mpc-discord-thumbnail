@@ -10,15 +10,17 @@ let mpcService: MpcHcService;
 let imgurService: ImgurService;
 let discordService: DiscordService;
 let imageService: ImageService;
-let updateInterval: NodeJS.Timeout | null = null;
+let isRunning: boolean = true;
+let updateIntervalMs: number = 10000;
 
 // Para detectar cambio de archivo
 let lastFile: string = '';
 // Para refrescar imagen cuando está pausado
 let pausedSinceTime: number = 0;
 const PAUSED_REFRESH_INTERVAL = 120000; // Refrescar imagen cada 2 minutos si está pausado
+const UPDATE_TIMEOUT = 30000; // Timeout máximo para cada ciclo de actualización
 
-async function updateLoop(): Promise<void> {
+async function updateLoopInternal(): Promise<void> {
   const status = await mpcService.getStatus();
 
   if (!status) {
@@ -41,7 +43,7 @@ async function updateLoop(): Promise<void> {
     // Capturar snapshot
     const snapshot = await mpcService.getSnapshot();
 
-    let imageUrl: string | undefined;
+    let imageUrl: string | undefined = imgurService.getLastUrl() || undefined;
     if (snapshot) {
       // Comprimir imagen antes de subir
       const compressed = await imageService.compress(snapshot);
@@ -58,7 +60,7 @@ async function updateLoop(): Promise<void> {
       largeImageText: status.file
     });
 
-    Logger.info(`Reproduciendo: ${cleanFilename(status.file)} [${status.positionString}]`);
+    Logger.info(`Reproduciendo: ${cleanFilename(status.file)} [${status.positionString}]${imageUrl ? '' : ' [SIN IMAGEN]'}`);
   } else if (status.state === 'paused') {
     const now = Date.now();
     let lastImageUrl = imgurService.getLastUrl();
@@ -95,6 +97,19 @@ async function updateLoop(): Promise<void> {
   } else {
     await discordService.clearActivity();
     Logger.debug('Detenido');
+  }
+}
+
+async function updateLoop(): Promise<void> {
+  try {
+    // Agregar timeout para evitar que el loop se congele
+    const timeoutPromise = new Promise<void>((_, reject) => {
+      setTimeout(() => reject(new Error('Timeout en updateLoop')), UPDATE_TIMEOUT);
+    });
+    
+    await Promise.race([updateLoopInternal(), timeoutPromise]);
+  } catch (error) {
+    Logger.error('Error en updateLoop', error as Error);
   }
 }
 
@@ -139,21 +154,31 @@ async function main(): Promise<void> {
 
   // Iniciar loop de actualización
   Logger.info(`Actualizando cada ${config.updateInterval / 1000} segundos\n`);
-  updateLoop(); // Primera ejecución inmediata
-  updateInterval = setInterval(updateLoop, config.updateInterval);
+  updateIntervalMs = config.updateInterval;
+  scheduleNextUpdate(); // Iniciar el loop
+}
+
+function scheduleNextUpdate(): void {
+  if (!isRunning) return;
+  
+  updateLoop().finally(() => {
+    if (isRunning) {
+      setTimeout(scheduleNextUpdate, updateIntervalMs);
+    }
+  });
 }
 
 // Graceful shutdown
 process.on('SIGINT', async () => {
   Logger.info('\nCerrando...');
-  if (updateInterval) clearInterval(updateInterval);
+  isRunning = false;
   await discordService.clearActivity();
   discordService.disconnect();
   process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
-  if (updateInterval) clearInterval(updateInterval);
+  isRunning = false;
   await discordService.clearActivity();
   discordService.disconnect();
   process.exit(0);
