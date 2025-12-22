@@ -29,6 +29,10 @@ export interface ImgurUploadResponse {
     id: string;
     link: string;
     deletehash: string;
+    type?: string;
+    size?: number;
+    width?: number;
+    height?: number;
   };
   success: boolean;
   status: number;

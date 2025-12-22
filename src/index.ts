@@ -17,7 +17,9 @@ let updateIntervalMs: number = 10000;
 let lastFile: string = '';
 // Para refrescar imagen cuando está pausado
 let pausedSinceTime: number = 0;
-const PAUSED_REFRESH_INTERVAL = 120000; // Refrescar imagen cada 2 minutos si está pausado
+let lastPausedSnapshot: Buffer | null = null; // Guardar snapshot de pausa para re-subir si es necesario
+let pauseRefreshCount: number = 0; // Contador de refreshes durante pausa
+const PAUSED_REFRESH_INTERVAL = 60000; // Refrescar imagen cada 1 minuto si está pausado (más frecuente)
 const UPDATE_TIMEOUT = 30000; // Timeout máximo para cada ciclo de actualización
 
 async function updateLoopInternal(): Promise<void> {
@@ -34,11 +36,14 @@ async function updateLoopInternal(): Promise<void> {
   if (fileChanged) {
     Logger.info(`Cambio de archivo detectado: ${cleanFilename(status.file)}`);
     lastFile = status.file;
+    lastPausedSnapshot = null; // Reset snapshot al cambiar archivo
   }
 
   if (status.state === 'playing') {
-    // Reset paused timer cuando está reproduciendo
+    // Reset paused timer y snapshot cuando está reproduciendo
     pausedSinceTime = 0;
+    lastPausedSnapshot = null;
+    pauseRefreshCount = 0;
     
     // Capturar snapshot
     const snapshot = await mpcService.getSnapshot();
@@ -68,21 +73,38 @@ async function updateLoopInternal(): Promise<void> {
     // Iniciar timer de pausa si no está iniciado
     if (pausedSinceTime === 0) {
       pausedSinceTime = now;
-    }
-    
-    // Refrescar imagen si lleva mucho tiempo pausado o no hay imagen
-    const pausedDuration = now - pausedSinceTime;
-    const needsRefresh = !lastImageUrl || pausedDuration >= PAUSED_REFRESH_INTERVAL;
-    
-    if (needsRefresh) {
+      pauseRefreshCount = 0;
+      // Capturar snapshot inicial de pausa
       const snapshot = await mpcService.getSnapshot();
       if (snapshot) {
-        const compressed = await imageService.compress(snapshot);
-        const url = await imgurService.upload(compressed, true); // Forzar subida
+        lastPausedSnapshot = await imageService.compress(snapshot);
+      }
+    }
+    
+    // Refrescar imagen periódicamente durante pausa para mantenerla visible
+    const pausedDuration = now - pausedSinceTime;
+    const refreshNumber = Math.floor(pausedDuration / PAUSED_REFRESH_INTERVAL);
+    const needsRefresh = !lastImageUrl || refreshNumber > pauseRefreshCount;
+    
+    if (needsRefresh) {
+      // Usar el snapshot guardado de pausa (misma imagen, nueva URL para evitar cache)
+      let snapshotToUpload = lastPausedSnapshot;
+      
+      // Si no hay snapshot guardado, capturar uno nuevo
+      if (!snapshotToUpload) {
+        const snapshot = await mpcService.getSnapshot();
+        if (snapshot) {
+          snapshotToUpload = await imageService.compress(snapshot);
+          lastPausedSnapshot = snapshotToUpload;
+        }
+      }
+      
+      if (snapshotToUpload) {
+        const url = await imgurService.upload(snapshotToUpload, true); // Forzar subida con nueva URL
         if (url) {
           lastImageUrl = url;
-          pausedSinceTime = now; // Reset timer después de refrescar
-          Logger.debug('Imagen refrescada durante pausa');
+          pauseRefreshCount = refreshNumber;
+          Logger.debug(`Imagen refrescada durante pausa (#${pauseRefreshCount})`);
         }
       }
     }

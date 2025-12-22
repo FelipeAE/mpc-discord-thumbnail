@@ -67,16 +67,25 @@ export class ImgurService {
 
       if (response.data.success) {
         this.lastHash = currentHash;
-        this.lastUrl = response.data.data.link;
+        // Agregar timestamp para evitar cache de Discord
+        this.lastUrl = `${response.data.data.link}?t=${now}`;
         this.lastUploadTime = now;
         Logger.info(`Imagen subida a Imgur: ${this.lastUrl}`);
+        Logger.debug(`Imgur respuesta completa: id=${response.data.data.id}, type=${response.data.data.type}, size=${response.data.data.size || 'N/A'}`);
         return this.lastUrl;
       }
 
-      Logger.error('Imgur respondió con error');
+      Logger.error(`Imgur respondió con error: ${JSON.stringify(response.data)}`);
       return this.lastUrl || null;
     } catch (error) {
-      Logger.error('Error al subir a Imgur', error as Error);
+      const axiosError = error as any;
+      if (axiosError.response) {
+        Logger.error(`Error Imgur HTTP ${axiosError.response.status}: ${JSON.stringify(axiosError.response.data)}`);
+      } else if (axiosError.code) {
+        Logger.error(`Error Imgur red: ${axiosError.code} - ${axiosError.message}`);
+      } else {
+        Logger.error('Error al subir a Imgur', error as Error);
+      }
       return this.lastUrl || null;
     }
   }
