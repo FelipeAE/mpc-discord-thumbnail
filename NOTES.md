@@ -1,6 +1,6 @@
 # MPC-HC Discord Thumbnail - Notas de Desarrollo
 
-## Última actualización: 2025-12-22
+## Última actualización: 2025-12-23
 
 ---
 
@@ -36,10 +36,13 @@ this.lastUrl = `${response.data.data.link}?t=${now}`;
 // discord.service.ts
 private readonly RECONNECT_INTERVAL = 1800000; // 30 minutos
 private readonly RECONNECT_ACTIVITY_COUNT = 100; // ~16 min de uso activo
+private readonly PAUSED_RECONNECT_INTERVAL = 300000; // 5 minutos si está pausado
 ```
 - Reconecta automáticamente cada 100 actualizaciones O 30 minutos
+- **NUEVO**: Si está pausado más de 5 minutos, reconecta cada 5 minutos
 - Solo cuenta cuando hay actividad real (reproduciendo/pausado)
 - Resetea contadores después de reconectar
+- Logs claros indicando razón de reconexión
 
 ### 3. Refresh de imagen durante pausa
 ```typescript
@@ -50,12 +53,23 @@ const PAUSED_REFRESH_INTERVAL = 60000; // 1 minuto
 - Guarda el snapshot de pausa para reutilizar (no captura de nuevo)
 - Intenta mantener el thumbnail visible durante pausas largas
 
+### 4. Detección de resume (pausa -> play)
+```typescript
+// index.ts
+const RESUME_THRESHOLD = 60000; // 1 minuto
+```
+- Si estuvo pausado más de 1 minuto y reanuda reproducción:
+  - Fuerza reconexión a Discord RPC
+  - Fuerza subida de nueva imagen a Imgur
+  - Log: "Resume detectado después de Xs de pausa - forzando refresh"
+
 ---
 
 ## Logging agregado para debug:
 
 ### Discord Service:
-- Log del resultado de `setActivity` cada 10 actualizaciones
+- Log del resultado de `setActivity` cada 10 actualizaciones con `large_image` de la respuesta
+- Advertencia si Discord no confirma la imagen en la respuesta (nuevo 2025-12-23)
 - Advertencia si `setActivity` devuelve null/undefined
 - Log cuando fuerza reconexión con contador de actualizaciones
 
@@ -73,7 +87,9 @@ const PAUSED_REFRESH_INTERVAL = 60000; // 1 minuto
 | Update interval | 10s | Frecuencia de actualización de Discord |
 | Imgur upload interval | 60s | Mínimo entre subidas a Imgur |
 | Paused refresh | 60s | Re-subir imagen durante pausa |
-| Discord reconnect | 100 updates / 30 min | Reconexión preventiva |
+| Discord reconnect (normal) | 100 updates / 30 min | Reconexión preventiva |
+| Discord reconnect (pausado) | 5 min | Reconexión más frecuente si pausado |
+| Resume threshold | 1 min | Tiempo mínimo de pausa para forzar refresh al reanudar |
 | Image compression | 640px, 80% quality | Tamaño de thumbnails |
 
 ---
@@ -120,3 +136,13 @@ npm restart            # Reiniciar con PM2
 npm run logs           # Ver logs en tiempo real
 pm2 logs mpc-discord   # Logs de PM2
 ```
+
+---
+
+## ⚠️ RECORDATORIO IMPORTANTE
+
+**Después de cada cambio en el código, SIEMPRE ejecutar:**
+```bash
+npm run build && npm restart
+```
+Esto compila TypeScript y reinicia el servicio con PM2 para aplicar los cambios.

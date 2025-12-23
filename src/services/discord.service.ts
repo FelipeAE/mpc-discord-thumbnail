@@ -18,8 +18,10 @@ export class DiscordService {
   private lastSuccessfulUpdate: number = Date.now();
   private lastReconnectTime: number = Date.now();
   private activityCount: number = 0; // Contador de actualizaciones desde última reconexión
+  private pausedSince: number = 0; // Timestamp de cuando empezó la pausa
   private readonly RECONNECT_INTERVAL = 1800000; // 30 minutos máximo sin reconectar
   private readonly RECONNECT_ACTIVITY_COUNT = 100; // Reconectar cada 100 actualizaciones (~16 min a 10s/update)
+  private readonly PAUSED_RECONNECT_INTERVAL = 300000; // 5 minutos - reconectar más seguido si está pausado
 
   constructor(clientId: string) {
     this.clientId = clientId;
@@ -38,19 +40,45 @@ export class DiscordService {
   }
 
   /**
+   * Notifica que el estado cambió a pausado
+   */
+  setPausedState(isPaused: boolean): void {
+    if (isPaused && this.pausedSince === 0) {
+      this.pausedSince = Date.now();
+      Logger.debug('Discord: estado cambiado a pausado');
+    } else if (!isPaused) {
+      this.pausedSince = 0;
+    }
+  }
+
+  /**
    * Verifica si necesita reconectar basado en tiempo o cantidad de actualizaciones
    */
   private needsReconnect(): boolean {
-    const timeSinceLastReconnect = Date.now() - this.lastReconnectTime;
-    // Reconectar si pasaron 30 min O si hubo 100 actualizaciones
-    return timeSinceLastReconnect > this.RECONNECT_INTERVAL || 
+    const now = Date.now();
+    const timeSinceLastReconnect = now - this.lastReconnectTime;
+    
+    // Si está pausado por más de 5 min, usar intervalo más corto
+    const isPausedLong = this.pausedSince > 0 && (now - this.pausedSince) > this.PAUSED_RECONNECT_INTERVAL;
+    const effectiveInterval = isPausedLong ? this.PAUSED_RECONNECT_INTERVAL : this.RECONNECT_INTERVAL;
+    
+    const needsIt = timeSinceLastReconnect > effectiveInterval || 
            this.activityCount >= this.RECONNECT_ACTIVITY_COUNT;
+    
+    if (needsIt) {
+      const reason = timeSinceLastReconnect > effectiveInterval 
+        ? `tiempo (${Math.floor(timeSinceLastReconnect / 60000)} min)` 
+        : `actualizaciones (${this.activityCount})`;
+      Logger.debug(`Discord: reconexión necesaria por ${reason}${isPausedLong ? ' [PAUSADO]' : ''}`);
+    }
+    
+    return needsIt;
   }
 
   /**
    * Fuerza reconexión recreando el cliente
    */
-  private async forceReconnect(): Promise<boolean> {
+  async forceReconnect(): Promise<boolean> {
     Logger.info(`Forzando reconexión a Discord RPC (después de ${this.activityCount} actualizaciones)...`);
     try {
       this.client.destroy();
@@ -124,10 +152,21 @@ export class DiscordService {
       });
       this.lastSuccessfulUpdate = Date.now();
       
-      // Log detallado del resultado de Discord (solo cada 10 actualizaciones para no saturar)
-      if (result && this.activityCount % 10 === 0) {
-        Logger.debug(`Discord RPC resultado (#${this.activityCount}): imagen recibida OK`);
-      } else if (!result) {
+      // Log detallado del resultado de Discord para debug
+      if (result) {
+        // Cast para acceder a assets que puede existir en la respuesta real
+        const resultAny = result as Record<string, unknown>;
+        const assets = resultAny.assets as { large_image?: string } | undefined;
+        if (assets?.large_image) {
+          // Solo log cada 10 actualizaciones para no saturar
+          if (this.activityCount % 10 === 0) {
+            Logger.debug(`Discord RPC (#${this.activityCount}): large_image=${assets.large_image.substring(0, 50)}...`);
+          }
+        } else if (options.largeImageKey) {
+          // Enviamos imagen pero Discord no la devolvió - posible problema
+          Logger.warn(`Discord RPC: imagen enviada pero no confirmada en respuesta`);
+        }
+      } else {
         Logger.warn('Discord RPC setActivity devolvió undefined/null');
       }
     } catch (error) {
