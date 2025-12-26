@@ -6,7 +6,7 @@
   "scripts": {
     "start": "pm2 start dist/index.js --name mpc-discord",
     "stop": "pm2 stop mpc-discord",
-    "restart": "pm2 restart mpc-discord",
+    "restart": "pm2 restart mpc-discord --update-env",
     "logs": "pm2 logs mpc-discord",
     "status": "pm2 status",
     "dev": "npx ts-node src/index.ts",

@@ -19,8 +19,10 @@ let lastFile: string = '';
 let pausedSinceTime: number = 0;
 let lastPausedSnapshot: Buffer | null = null; // Guardar snapshot de pausa para re-subir si es necesario
 let pauseRefreshCount: number = 0; // Contador de refreshes durante pausa
-const PAUSED_REFRESH_INTERVAL = 60000; // Refrescar imagen cada 1 minuto si está pausado (más frecuente)
+let lastState: string = ''; // Para detectar cambio de estado (paused -> playing)
+const PAUSED_REFRESH_INTERVAL = 180000; // Refrescar imagen cada 3 minutos si está pausado
 const UPDATE_TIMEOUT = 30000; // Timeout máximo para cada ciclo de actualización
+const RESUME_THRESHOLD = 60000; // Si estuvo pausado más de 1 min, forzar refresh al reanudar
 
 async function updateLoopInternal(): Promise<void> {
   const status = await mpcService.getStatus();
@@ -40,10 +42,22 @@ async function updateLoopInternal(): Promise<void> {
   }
 
   if (status.state === 'playing') {
+    // Detectar si viene de una pausa larga (resume)
+    const wasLongPause = lastState === 'paused' && pausedSinceTime > 0 && 
+                         (Date.now() - pausedSinceTime) > RESUME_THRESHOLD;
+    
+    if (wasLongPause) {
+      const pauseDuration = Math.floor((Date.now() - pausedSinceTime) / 1000);
+      Logger.info(`Resume detectado después de ${pauseDuration}s de pausa - forzando refresh`);
+      await discordService.forceReconnect(); // Reconectar Discord RPC
+    }
+    
     // Reset paused timer y snapshot cuando está reproduciendo
     pausedSinceTime = 0;
     lastPausedSnapshot = null;
     pauseRefreshCount = 0;
+    lastState = 'playing';
+    discordService.setPausedState(false); // Notificar a Discord que no está pausado
     
     // Capturar snapshot
     const snapshot = await mpcService.getSnapshot();
@@ -52,8 +66,9 @@ async function updateLoopInternal(): Promise<void> {
     if (snapshot) {
       // Comprimir imagen antes de subir
       const compressed = await imageService.compress(snapshot);
-      // Subir (forzar si cambió el archivo)
-      const url = await imgurService.upload(compressed, fileChanged);
+      // Subir (forzar si cambió el archivo O si viene de pausa larga)
+      const forceReason = fileChanged ? 'cambio de archivo' : (wasLongPause ? 'resume después de pausa' : undefined);
+      const url = await imgurService.upload(compressed, fileChanged || wasLongPause, forceReason);
       if (url) imageUrl = url;
     }
 
@@ -69,6 +84,8 @@ async function updateLoopInternal(): Promise<void> {
   } else if (status.state === 'paused') {
     const now = Date.now();
     let lastImageUrl = imgurService.getLastUrl();
+    lastState = 'paused';
+    discordService.setPausedState(true); // Notificar a Discord que está pausado
     
     // Iniciar timer de pausa si no está iniciado
     if (pausedSinceTime === 0) {
@@ -100,7 +117,7 @@ async function updateLoopInternal(): Promise<void> {
       }
       
       if (snapshotToUpload) {
-        const url = await imgurService.upload(snapshotToUpload, true); // Forzar subida con nueva URL
+        const url = await imgurService.upload(snapshotToUpload, true, 'refresh durante pausa'); // Forzar subida con nueva URL
         if (url) {
           lastImageUrl = url;
           pauseRefreshCount = refreshNumber;
@@ -117,6 +134,8 @@ async function updateLoopInternal(): Promise<void> {
     });
     Logger.info(`Pausado: ${cleanFilename(status.file)}${lastImageUrl ? '' : ' [SIN IMAGEN]'}`);
   } else {
+    lastState = 'stopped';
+    discordService.setPausedState(false);
     await discordService.clearActivity();
     Logger.debug('Detenido');
   }

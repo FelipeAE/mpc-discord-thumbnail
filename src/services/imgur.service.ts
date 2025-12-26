@@ -24,17 +24,28 @@ export class ImgurService {
    * Sube una imagen a Imgur (respetando el intervalo mínimo)
    * @param imageBuffer - Buffer de la imagen a subir
    * @param forceUpload - Si es true, ignora el intervalo y sube inmediatamente
+   * @param reason - Razón de la subida forzada (para logs)
    * @returns URL de la imagen o null si hay error
    */
-  async upload(imageBuffer: Buffer, forceUpload: boolean = false): Promise<string | null> {
+  async upload(imageBuffer: Buffer, forceUpload: boolean = false, reason?: string): Promise<string | null> {
     const now = Date.now();
     const timeSinceLastUpload = now - this.lastUploadTime;
+    
+    // Cambio de archivo siempre tiene prioridad máxima
+    const isFileChange = reason === 'cambio de archivo';
 
     // Si ya tenemos una URL, no es forzado, y no ha pasado el intervalo, reutilizar
     if (!forceUpload && this.lastUrl && timeSinceLastUpload < this.uploadInterval) {
       const remainingSecs = Math.ceil((this.uploadInterval - timeSinceLastUpload) / 1000);
       Logger.debug(`Reutilizando imagen anterior (próxima subida en ${remainingSecs}s)`);
       return this.lastUrl;
+    }
+
+    // Cooldown mínimo de 30s para subidas forzadas (excepto cambio de archivo)
+    const MIN_FORCED_INTERVAL = 30000;
+    if (forceUpload && !isFileChange && this.lastUploadTime > 0 && timeSinceLastUpload < MIN_FORCED_INTERVAL) {
+      Logger.debug(`Cooldown de subida forzada (${Math.ceil((MIN_FORCED_INTERVAL - timeSinceLastUpload) / 1000)}s restantes)`);
+      return this.lastUrl || null;
     }
 
     // Verificar si la imagen cambió (optimización adicional, solo si no es forzado)
@@ -45,7 +56,7 @@ export class ImgurService {
     }
 
     if (forceUpload) {
-      Logger.info('Subida forzada: detectado cambio de archivo');
+      Logger.info(`Subida forzada: ${reason || 'razón no especificada'}`);
     }
 
     try {

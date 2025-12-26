@@ -1,6 +1,6 @@
 # MPC-HC Discord Thumbnail - Notas de Desarrollo
 
-## Última actualización: 2025-12-23
+## Última actualización: 2025-12-25
 
 ---
 
@@ -47,9 +47,9 @@ private readonly PAUSED_RECONNECT_INTERVAL = 300000; // 5 minutos si está pausa
 ### 3. Refresh de imagen durante pausa
 ```typescript
 // index.ts
-const PAUSED_REFRESH_INTERVAL = 60000; // 1 minuto
+const PAUSED_REFRESH_INTERVAL = 180000; // 3 minutos
 ```
-- Cuando está pausado, re-sube la misma imagen cada 1 minuto con nueva URL
+- Cuando está pausado, re-sube la misma imagen cada 3 minutos con nueva URL
 - Guarda el snapshot de pausa para reutilizar (no captura de nuevo)
 - Intenta mantener el thumbnail visible durante pausas largas
 
@@ -85,8 +85,8 @@ const RESUME_THRESHOLD = 60000; // 1 minuto
 | Parámetro | Valor | Descripción |
 |-----------|-------|-------------|
 | Update interval | 10s | Frecuencia de actualización de Discord |
-| Imgur upload interval | 60s | Mínimo entre subidas a Imgur |
-| Paused refresh | 60s | Re-subir imagen durante pausa |
+| Imgur upload interval | 180s (3 min) | Mínimo entre subidas a Imgur |
+| Paused refresh | 180s (3 min) | Re-subir imagen durante pausa |
 | Discord reconnect (normal) | 100 updates / 30 min | Reconexión preventiva |
 | Discord reconnect (pausado) | 5 min | Reconexión más frecuente si pausado |
 | Resume threshold | 1 min | Tiempo mínimo de pausa para forzar refresh al reanudar |
@@ -96,15 +96,13 @@ const RESUME_THRESHOLD = 60000; // 1 minuto
 
 ## Ideas pendientes por probar:
 
-1. **Usar imagen estática como fallback**: Registrar una imagen en Discord Developer Portal y usarla cuando las externas fallan
+1. **Detectar cuando Discord rechaza imagen**: Verificar la respuesta de `setActivity` más a fondo
 
-2. **Detectar cuando Discord rechaza imagen**: Verificar la respuesta de `setActivity` más a fondo
+2. **Reducir frecuencia de nuevas URLs**: Quizás Discord penaliza por cambiar URLs muy seguido (actualmente 3 min)
 
-3. **Reducir frecuencia de nuevas URLs**: Quizás Discord penaliza por cambiar URLs muy seguido
+3. **Proxy de imágenes**: Usar un servicio propio en lugar de Imgur directo
 
-4. **Proxy de imágenes**: Usar un servicio propio en lugar de Imgur directo
-
-5. **Discord Application Assets**: Subir imágenes directamente a Discord en lugar de usar URLs externas
+4. **Discord Application Assets**: Subir imágenes directamente a Discord en lugar de usar URLs externas
 
 ---
 
@@ -146,3 +144,21 @@ pm2 logs mpc-discord   # Logs de PM2
 npm run build && npm restart
 ```
 Esto compila TypeScript y reinicia el servicio con PM2 para aplicar los cambios.
+
+---
+
+## Sesión 2025-12-25: Avances y descubrimientos
+
+### Hallazgo clave:
+- **Reiniciar Discord (cliente) resetea el rate limit de imágenes externas**
+- Cuando el thumbnail desaparece, cerrar y abrir Discord lo soluciona inmediatamente
+- Esto confirma que es un rate limit del lado del cliente Discord, no del servidor
+
+### Cambios realizados:
+- Aumentado `IMGUR_UPLOAD_INTERVAL` de 2 min a 3 min
+- Aumentado `PAUSED_REFRESH_INTERVAL` de 2 min a 3 min
+- Objetivo: reducir cantidad de URLs únicas para evitar rate limit
+
+### Próximos pasos a evaluar:
+- Si sigue fallando con 3 min, aumentar a 4-5 min
+- Considerar reconexión más agresiva que simule reinicio de Discord
