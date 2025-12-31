@@ -20,7 +20,7 @@ export class DiscordService {
   private activityCount: number = 0; // Contador de actualizaciones desde última reconexión
   private pausedSince: number = 0; // Timestamp de cuando empezó la pausa
   private readonly RECONNECT_INTERVAL = 1800000; // 30 minutos máximo sin reconectar
-  private readonly RECONNECT_ACTIVITY_COUNT = 100; // Reconectar cada 100 actualizaciones (~16 min a 10s/update)
+  private readonly RECONNECT_ACTIVITY_COUNT = 50; // Reconectar cada 50 actualizaciones (~8 min a 10s/update)
   private readonly PAUSED_RECONNECT_INTERVAL = 300000; // 5 minutos - reconectar más seguido si está pausado
 
   constructor(clientId: string) {

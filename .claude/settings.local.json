@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir \"C:\\Users\\fiae\\mpc-discord-thumbnail\" /B)",
+      "mcp__context7__resolve-library-id",
+      "mcp__context7__get-library-docs",
+      "WebSearch",
+      "WebFetch(domain:deepwiki.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:www.npmjs.com)",
+      "WebFetch(domain:discord.com)",
+      "Bash(npm install:*)",
+      "Bash(npm run dev:*)",
+      "Bash(npm start)",
+      "Bash(npm run logs:*)",
+      "Bash(npm run build:*)",
+      "Bash(npm restart)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nAdd MPC-HC Discord Rich Presence with Imgur thumbnails\n\n- Capture screenshots from MPC-HC web interface\n- Upload thumbnails to Imgur with rate limiting (2 min interval)\n- Display Rich Presence in Discord with live thumbnail\n- Support for play/pause states with image persistence\n- File logging for debugging\n- PM2 integration for background execution\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(git push)",
+      "Bash(npx pm2 start:*)",
+      "Bash(npx pm2:*)",
+      "Bash(dir \"C:\\Users\\fiae\\mpc-discord-thumbnail\\logs\" /B)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nAdd image compression, file change detection, and daily log rotation\n\n- Add sharp for image compression (640px, 80% quality)\n- Detect file changes and force immediate thumbnail upload\n- Implement daily log rotation with 7-day retention\n- Increase Imgur timeout to 60 seconds\n- Store logs in logs/ folder with date-based filenames\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(git commit -m \"$(cat <<''EOF''\nImprove filename cleaning with regex\n\n- Remove fansub group tags from start (e.g., [Erai-raws])\n- Remove technical tags from end (e.g., [1080p], [MultiSub], [hash])\n- Show only anime title and episode number\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(git commit:*)"
+    ]
+  }
+}

@@ -1,6 +1,6 @@
 # MPC-HC Discord Thumbnail - Notas de Desarrollo
 
-## Última actualización: 2025-12-25
+## Última actualización: 2025-12-31
 
 ---
 
@@ -87,7 +87,7 @@ const RESUME_THRESHOLD = 60000; // 1 minuto
 | Update interval | 10s | Frecuencia de actualización de Discord |
 | Imgur upload interval | 180s (3 min) | Mínimo entre subidas a Imgur |
 | Paused refresh | 180s (3 min) | Re-subir imagen durante pausa |
-| Discord reconnect (normal) | 100 updates / 30 min | Reconexión preventiva |
+| Discord reconnect (normal) | 50 updates / 30 min | Reconexión preventiva (más frecuente) |
 | Discord reconnect (pausado) | 5 min | Reconexión más frecuente si pausado |
 | Resume threshold | 1 min | Tiempo mínimo de pausa para forzar refresh al reanudar |
 | Image compression | 640px, 80% quality | Tamaño de thumbnails |
@@ -162,3 +162,29 @@ Esto compila TypeScript y reinicia el servicio con PM2 para aplicar los cambios.
 ### Próximos pasos a evaluar:
 - Si sigue fallando con 3 min, aumentar a 4-5 min
 - Considerar reconexión más agresiva que simule reinicio de Discord
+
+---
+
+## Sesión 2025-12-31: Gran mejora en duración
+
+### Resultados de prueba:
+- **11 capítulos vistos** (episodios 047-057 de Katekyo Hitman Reborn)
+- **~4 horas de uso** antes de que el thumbnail desapareciera
+- **70 imágenes únicas** subidas a Imgur durante la sesión
+- Mejora significativa respecto a los 20-40 minutos anteriores
+
+### Hallazgo clave:
+- El rate limit de Discord parece activarse después de ~60-70 URLs externas únicas
+- Las reconexiones periódicas ayudan a extender la vida útil
+- Las URLs únicas (con timestamp) son necesarias para que Discord refresque el thumbnail
+- Sin URLs únicas, Discord cachea y no actualiza la imagen
+
+### Cambio implementado:
+- Reducido `RECONNECT_ACTIVITY_COUNT` de 100 a **50** (~8 min en vez de ~16 min)
+- Objetivo: reconectar más frecuentemente para resetear el rate limit de Discord
+- Similar a hacer "npm restart" parcial más seguido
+
+### Balance identificado:
+- **Pocas URLs únicas** → Discord cachea y no refresca thumbnail
+- **Muchas URLs únicas** → Discord hace rate limit y deja de mostrar
+- La reconexión frecuente podría ser el punto medio ideal
