@@ -22,6 +22,7 @@ export interface Config {
     clientId: string;
   };
   updateInterval: number;
+  flipThumbnail: boolean; // Fix para bug de MPC-HC con múltiples monitores
 }
 
 export interface ImgurUploadResponse {

@@ -18,6 +18,12 @@ function getEnvNumber(name: string, defaultValue: number): number {
   return isNaN(parsed) ? defaultValue : parsed;
 }
 
+function getEnvBoolean(name: string, defaultValue: boolean): boolean {
+  const value = process.env[name];
+  if (!value) return defaultValue;
+  return value.toLowerCase() === 'true' || value === '1';
+}
+
 export function loadConfig(): Config {
   return {
     mpc: {
@@ -31,6 +37,7 @@ export function loadConfig(): Config {
     discord: {
       clientId: getEnvVar('DISCORD_CLIENT_ID')
     },
-    updateInterval: getEnvNumber('UPDATE_INTERVAL', 15000)
+    updateInterval: getEnvNumber('UPDATE_INTERVAL', 15000),
+    flipThumbnail: getEnvBoolean('FLIP_THUMBNAIL', false) // Fix para imagen espejada
   };
 }

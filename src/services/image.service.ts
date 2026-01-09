@@ -4,14 +4,17 @@ import Logger from '../utils/logger';
 export class ImageService {
   private width: number;
   private quality: number;
+  private flipHorizontal: boolean;
 
   /**
    * @param width - Ancho máximo de la imagen (default: 640px)
    * @param quality - Calidad JPEG 1-100 (default: 80)
+   * @param flipHorizontal - Voltear imagen horizontalmente (default: false) - útil para bug de MPC-HC con múltiples monitores
    */
-  constructor(width: number = 640, quality: number = 80) {
+  constructor(width: number = 640, quality: number = 80, flipHorizontal: boolean = false) {
     this.width = width;
     this.quality = quality;
+    this.flipHorizontal = flipHorizontal;
   }
 
   /**
@@ -23,11 +26,18 @@ export class ImageService {
     try {
       const originalSize = imageBuffer.length;
 
-      const compressed = await sharp(imageBuffer)
+      let pipeline = sharp(imageBuffer)
         .resize(this.width, null, {
           withoutEnlargement: true,
           fit: 'inside'
-        })
+        });
+      
+      // Fix para bug de MPC-HC con múltiples monitores que causa imagen espejada
+      if (this.flipHorizontal) {
+        pipeline = pipeline.flop();
+      }
+
+      const compressed = await pipeline
         .jpeg({
           quality: this.quality,
           mozjpeg: true
