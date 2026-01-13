@@ -35,7 +35,9 @@ export function loadConfig(): Config {
       uploadInterval: getEnvNumber('IMGUR_UPLOAD_INTERVAL', 120000) // 2 min default
     },
     discord: {
-      clientId: getEnvVar('DISCORD_CLIENT_ID')
+      clientId: getEnvVar('DISCORD_CLIENT_ID'),
+      autoRestart: getEnvBoolean('AUTO_RESTART_DISCORD', false),
+      restartThreshold: getEnvNumber('DISCORD_RESTART_THRESHOLD', 60) // Reiniciar después de 60 imágenes únicas
     },
     updateInterval: getEnvNumber('UPDATE_INTERVAL', 15000),
     flipThumbnail: getEnvBoolean('FLIP_THUMBNAIL', false) // Fix para imagen espejada

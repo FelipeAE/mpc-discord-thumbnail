@@ -20,6 +20,8 @@ export interface Config {
   };
   discord: {
     clientId: string;
+    autoRestart: boolean;
+    restartThreshold: number; // Cantidad de imágenes únicas antes de reiniciar Discord
   };
   updateInterval: number;
   flipThumbnail: boolean; // Fix para bug de MPC-HC con múltiples monitores

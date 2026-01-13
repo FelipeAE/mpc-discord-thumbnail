@@ -188,3 +188,36 @@ Esto compila TypeScript y reinicia el servicio con PM2 para aplicar los cambios.
 - **Pocas URLs únicas** → Discord cachea y no refresca thumbnail
 - **Muchas URLs únicas** → Discord hace rate limit y deja de mostrar
 - La reconexión frecuente podría ser el punto medio ideal
+
+---
+
+## Sesión 2026-01-13: Confirmación del rate limit y solución
+
+### Resultados de prueba:
+- **87 imágenes únicas** subidas antes de que el thumbnail desapareciera
+- Reiniciar Discord (cliente) inmediatamente restauró el thumbnail
+- Confirma el patrón: ~60-90 URLs únicas activan el rate limit del cliente Discord
+
+### Hallazgo definitivo:
+- **Reconectar RPC no es suficiente** - el rate limit está en el cliente Discord, no en la conexión
+- **Reiniciar el cliente Discord** es la única forma de resetear el rate limit de imágenes externas
+- El límite parece ser ~60-90 imágenes externas únicas por sesión de Discord
+
+### Nueva funcionalidad implementada: Auto-reinicio de Discord
+```env
+# .env
+AUTO_RESTART_DISCORD=true      # Activar reinicio automático (default: false)
+DISCORD_RESTART_THRESHOLD=60   # Reiniciar después de X imágenes únicas (default: 60)
+```
+
+### Funcionamiento:
+1. El servicio cuenta las imágenes únicas subidas a Imgur
+2. Al alcanzar el umbral (default 60), cierra Discord automáticamente
+3. Espera 2 segundos y lo vuelve a abrir
+4. Reconecta el RPC y resetea el contador
+5. El thumbnail vuelve a funcionar sin intervención manual
+
+### Consideraciones:
+- Opción desactivada por defecto (puede ser molesto para algunos usuarios)
+- El reinicio de Discord cierra cualquier llamada en curso
+- El proceso toma ~10 segundos en total

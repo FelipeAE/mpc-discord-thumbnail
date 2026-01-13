@@ -10,6 +10,7 @@ export class ImgurService {
   private lastUrl: string = '';
   private lastUploadTime: number = 0;
   private uploadInterval: number;
+  private uniqueImageCount: number = 0; // Contador de imágenes únicas subidas
 
   /**
    * @param clientId - Imgur Client ID
@@ -81,6 +82,7 @@ export class ImgurService {
         // Agregar timestamp para evitar cache de Discord
         this.lastUrl = `${response.data.data.link}?t=${now}`;
         this.lastUploadTime = now;
+        this.uniqueImageCount++; // Incrementar contador de imágenes únicas
         Logger.info(`Imagen subida a Imgur: ${this.lastUrl}`);
         Logger.debug(`Imgur respuesta completa: id=${response.data.data.id}, type=${response.data.data.type}, size=${response.data.data.size || 'N/A'}`);
         return this.lastUrl;
@@ -115,5 +117,20 @@ export class ImgurService {
     this.lastHash = '';
     this.lastUrl = '';
     this.lastUploadTime = 0;
+  }
+
+  /**
+   * Obtiene el contador de imágenes únicas subidas
+   */
+  getUniqueImageCount(): number {
+    return this.uniqueImageCount;
+  }
+
+  /**
+   * Resetea el contador de imágenes únicas (después de reiniciar Discord)
+   */
+  resetUniqueImageCount(): void {
+    this.uniqueImageCount = 0;
+    Logger.debug('Contador de imágenes únicas reseteado');
   }
 }

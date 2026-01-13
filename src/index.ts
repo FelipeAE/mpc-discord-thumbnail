@@ -5,6 +5,7 @@ import { DiscordService } from './services/discord.service';
 import { ImageService } from './services/image.service';
 import { cleanFilename } from './utils/helpers';
 import Logger from './utils/logger';
+import { exec } from 'child_process';
 
 let mpcService: MpcHcService;
 let imgurService: ImgurService;
@@ -23,6 +24,10 @@ let lastState: string = ''; // Para detectar cambio de estado (paused -> playing
 const PAUSED_REFRESH_INTERVAL = 180000; // Refrescar imagen cada 3 minutos si está pausado
 const UPDATE_TIMEOUT = 30000; // Timeout máximo para cada ciclo de actualización
 const RESUME_THRESHOLD = 60000; // Si estuvo pausado más de 1 min, forzar refresh al reanudar
+
+// Configuración de reinicio automático de Discord
+let autoRestartDiscord: boolean = false;
+let discordRestartThreshold: number = 60;
 
 async function updateLoopInternal(): Promise<void> {
   const status = await mpcService.getStatus();
@@ -139,6 +144,66 @@ async function updateLoopInternal(): Promise<void> {
     await discordService.clearActivity();
     Logger.debug('Detenido');
   }
+
+  // Verificar si necesitamos reiniciar Discord por rate limit de imágenes
+  await checkDiscordRestart();
+}
+
+async function restartDiscord(): Promise<void> {
+  Logger.info('Reiniciando Discord para evitar rate limit de imágenes...');
+  
+  // Desconectar RPC primero
+  discordService.disconnect();
+  
+  return new Promise((resolve) => {
+    // Matar todos los procesos de Discord
+    exec('taskkill /IM Discord.exe /F', (error) => {
+      if (error) {
+        Logger.warn('No se pudo cerrar Discord (puede que ya estuviera cerrado)');
+      }
+      
+      // Esperar un momento y reiniciar Discord
+      setTimeout(() => {
+        // Buscar Discord en ubicaciones comunes
+        const discordPaths = [
+          `${process.env.LOCALAPPDATA}\\Discord\\Update.exe --processStart Discord.exe`,
+          `${process.env.APPDATA}\\Microsoft\\Windows\\Start Menu\\Programs\\Discord Inc\\Discord.lnk`
+        ];
+        
+        exec(`start "" "${discordPaths[0]}"`, { shell: 'cmd.exe' }, async (err) => {
+          if (err) {
+            Logger.warn('No se pudo iniciar Discord automáticamente. Por favor, ábrelo manualmente.');
+          } else {
+            Logger.info('Discord reiniciado. Esperando reconexión...');
+          }
+          
+          // Esperar a que Discord inicie
+          await new Promise(r => setTimeout(r, 8000));
+          
+          // Reconectar RPC
+          const connected = await discordService.connect();
+          if (connected) {
+            Logger.info('Reconectado a Discord RPC después del reinicio');
+            imgurService.resetUniqueImageCount();
+          } else {
+            Logger.error('No se pudo reconectar a Discord RPC');
+          }
+          
+          resolve();
+        });
+      }, 2000);
+    });
+  });
+}
+
+async function checkDiscordRestart(): Promise<void> {
+  if (!autoRestartDiscord) return;
+  
+  const imageCount = imgurService.getUniqueImageCount();
+  if (imageCount >= discordRestartThreshold) {
+    Logger.info(`Límite de imágenes alcanzado (${imageCount}/${discordRestartThreshold}) - reiniciando Discord`);
+    await restartDiscord();
+  }
 }
 
 async function updateLoop(): Promise<void> {
@@ -179,6 +244,13 @@ async function main(): Promise<void> {
   Logger.info('Compresión de imagen: 640px, calidad 80%');
   if (config.flipThumbnail) {
     Logger.info('Flip horizontal activado (fix para multi-monitor)');
+  }
+  
+  // Configurar reinicio automático de Discord
+  autoRestartDiscord = config.discord.autoRestart;
+  discordRestartThreshold = config.discord.restartThreshold;
+  if (autoRestartDiscord) {
+    Logger.info(`Auto-reinicio de Discord: activado (cada ${discordRestartThreshold} imágenes)`);
   }
 
   // Verificar conexión con MPC-HC
