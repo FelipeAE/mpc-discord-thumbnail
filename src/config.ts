@@ -40,6 +40,7 @@ export function loadConfig(): Config {
       restartThreshold: getEnvNumber('DISCORD_RESTART_THRESHOLD', 60) // Reiniciar después de 60 imágenes únicas
     },
     updateInterval: getEnvNumber('UPDATE_INTERVAL', 15000),
-    flipThumbnail: getEnvBoolean('FLIP_THUMBNAIL', false) // Fix para imagen espejada
+    flipThumbnail: getEnvBoolean('FLIP_THUMBNAIL', false), // Fix para imagen espejada
+    flipVertical: getEnvBoolean('FLIP_VERTICAL', false) // Fix para imagen de cabeza (renderizador MPC)
   };
 }

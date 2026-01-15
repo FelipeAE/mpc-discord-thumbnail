@@ -238,12 +238,15 @@ async function main(): Promise<void> {
   mpcService = new MpcHcService(config.mpc.host, config.mpc.port);
   imgurService = new ImgurService(config.imgur.clientId, config.imgur.uploadInterval);
   discordService = new DiscordService(config.discord.clientId);
-  imageService = new ImageService(640, 80, config.flipThumbnail); // 640px ancho, 80% calidad
+  imageService = new ImageService(640, 80, config.flipThumbnail, config.flipVertical); // 640px ancho, 80% calidad
 
   Logger.info(`Imgur: subida cada ${config.imgur.uploadInterval / 1000} segundos`);
   Logger.info('Compresión de imagen: 640px, calidad 80%');
   if (config.flipThumbnail) {
     Logger.info('Flip horizontal activado (fix para multi-monitor)');
+  }
+  if (config.flipVertical) {
+    Logger.info('Flip vertical activado (fix para renderizador MPC)');
   }
   
   // Configurar reinicio automático de Discord

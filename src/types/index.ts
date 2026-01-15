@@ -24,7 +24,8 @@ export interface Config {
     restartThreshold: number; // Cantidad de imágenes únicas antes de reiniciar Discord
   };
   updateInterval: number;
-  flipThumbnail: boolean; // Fix para bug de MPC-HC con múltiples monitores
+  flipThumbnail: boolean; // Fix para bug de MPC-HC con múltiples monitores (horizontal)
+  flipVertical: boolean; // Fix para renderizador MPC que produce imagen de cabeza
 }
 
 export interface ImgurUploadResponse {

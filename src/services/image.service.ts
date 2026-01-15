@@ -5,16 +5,19 @@ export class ImageService {
   private width: number;
   private quality: number;
   private flipHorizontal: boolean;
+  private flipVertical: boolean;
 
   /**
    * @param width - Ancho máximo de la imagen (default: 640px)
    * @param quality - Calidad JPEG 1-100 (default: 80)
    * @param flipHorizontal - Voltear imagen horizontalmente (default: false) - útil para bug de MPC-HC con múltiples monitores
+   * @param flipVertical - Voltear imagen verticalmente (default: false) - útil para renderizador MPC que produce imagen de cabeza
    */
-  constructor(width: number = 640, quality: number = 80, flipHorizontal: boolean = false) {
+  constructor(width: number = 640, quality: number = 80, flipHorizontal: boolean = false, flipVertical: boolean = false) {
     this.width = width;
     this.quality = quality;
     this.flipHorizontal = flipHorizontal;
+    this.flipVertical = flipVertical;
   }
 
   /**
@@ -35,6 +38,11 @@ export class ImageService {
       // Fix para bug de MPC-HC con múltiples monitores que causa imagen espejada
       if (this.flipHorizontal) {
         pipeline = pipeline.flop();
+      }
+      
+      // Fix para renderizador MPC que produce imagen de cabeza
+      if (this.flipVertical) {
+        pipeline = pipeline.flip();
       }
 
       const compressed = await pipeline
