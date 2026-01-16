@@ -3,7 +3,7 @@ import { MpcHcService } from './services/mpc-hc.service';
 import { ImgurService } from './services/imgur.service';
 import { DiscordService } from './services/discord.service';
 import { ImageService } from './services/image.service';
-import { cleanFilename } from './utils/helpers';
+import { cleanFilename, getActiveMonitorCount } from './utils/helpers';
 import Logger from './utils/logger';
 import { exec } from 'child_process';
 
@@ -29,7 +29,35 @@ const RESUME_THRESHOLD = 60000; // Si estuvo pausado más de 1 min, forzar refre
 let autoRestartDiscord: boolean = false;
 let discordRestartThreshold: number = 60;
 
+// Para detección automática de monitores
+let flipVerticalMode: boolean | 'auto' = 'auto';
+let lastMonitorCount: number = 1;
+
+// Cache de detección de monitores (no verificar en cada ciclo)
+let lastMonitorCheck: number = 0;
+const MONITOR_CHECK_INTERVAL = 60000; // Verificar cada 60 segundos
+
+async function checkMonitorFlip(): Promise<void> {
+  if (flipVerticalMode !== 'auto') return;
+  
+  // Solo verificar cada MONITOR_CHECK_INTERVAL
+  const now = Date.now();
+  if (now - lastMonitorCheck < MONITOR_CHECK_INTERVAL) return;
+  lastMonitorCheck = now;
+  
+  const monitorCount = await getActiveMonitorCount();
+  if (monitorCount !== lastMonitorCount) {
+    lastMonitorCount = monitorCount;
+    const shouldFlip = monitorCount > 1;
+    imageService.setFlipVertical(shouldFlip);
+    Logger.info(`Monitores activos: ${monitorCount} - Flip vertical: ${shouldFlip ? 'activado' : 'desactivado'}`);
+  }
+}
+
 async function updateLoopInternal(): Promise<void> {
+  // Verificar monitores para flip automático
+  await checkMonitorFlip();
+  
   const status = await mpcService.getStatus();
 
   if (!status) {
@@ -245,8 +273,17 @@ async function main(): Promise<void> {
   if (config.flipThumbnail) {
     Logger.info('Flip horizontal activado (fix para multi-monitor)');
   }
-  if (config.flipVertical) {
-    Logger.info('Flip vertical activado (fix para renderizador MPC)');
+  
+  // Configurar modo de flip vertical
+  flipVerticalMode = config.flipVertical;
+  if (config.flipVertical === 'auto') {
+    const monitorCount = await getActiveMonitorCount();
+    lastMonitorCount = monitorCount;
+    const shouldFlip = monitorCount > 1;
+    imageService.setFlipVertical(shouldFlip);
+    Logger.info(`Flip vertical: AUTO (${monitorCount} monitor${monitorCount > 1 ? 'es' : ''} - ${shouldFlip ? 'activado' : 'desactivado'})`);
+  } else if (config.flipVertical) {
+    Logger.info('Flip vertical: activado (forzado)');
   }
   
   // Configurar reinicio automático de Discord
