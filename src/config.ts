@@ -24,13 +24,6 @@ function getEnvBoolean(name: string, defaultValue: boolean): boolean {
   return value.toLowerCase() === 'true' || value === '1';
 }
 
-function getEnvBooleanOrAuto(name: string, defaultValue: boolean | 'auto'): boolean | 'auto' {
-  const value = process.env[name];
-  if (!value) return defaultValue;
-  if (value.toLowerCase() === 'auto') return 'auto';
-  return value.toLowerCase() === 'true' || value === '1';
-}
-
 export function loadConfig(): Config {
   return {
     mpc: {
@@ -48,6 +41,6 @@ export function loadConfig(): Config {
     },
     updateInterval: getEnvNumber('UPDATE_INTERVAL', 15000),
     flipThumbnail: getEnvBoolean('FLIP_THUMBNAIL', false), // Fix para imagen espejada
-    flipVertical: getEnvBooleanOrAuto('FLIP_VERTICAL', false) // false default, 'auto' detecta monitores, true forzado
+    flipVertical: getEnvBoolean('FLIP_VERTICAL', false) // Fix para imagen de cabeza (renderizador MPC)
   };
 }

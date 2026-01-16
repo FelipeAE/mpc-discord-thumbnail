@@ -25,7 +25,7 @@ export interface Config {
   };
   updateInterval: number;
   flipThumbnail: boolean; // Fix para bug de MPC-HC con múltiples monitores (horizontal)
-  flipVertical: boolean | 'auto'; // 'auto' detecta monitores, true/false forzado
+  flipVertical: boolean; // Fix para renderizador MPC que produce imagen de cabeza
 }
 
 export interface ImgurUploadResponse {
