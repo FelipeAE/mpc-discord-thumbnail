@@ -221,3 +221,23 @@ DISCORD_RESTART_THRESHOLD=60   # Reiniciar después de X imágenes únicas (defa
 - Opción desactivada por defecto (puede ser molesto para algunos usuarios)
 - El reinicio de Discord cierra cualquier llamada en curso
 - El proceso toma ~10 segundos en total
+
+---
+
+## Sesión 2026-01-16: Problema de instancia fantasma de MPC-HC
+
+### Síntoma:
+- Después de cambiar de monitor, la app dejó de mostrar Rich Presence en Discord
+- Logs mostraban "MPC-HC no disponible" aunque MPC-HC estaba abierto con interfaz web activada
+
+### Causa:
+- **2 instancias de MPC-HC corriendo** - una instancia anterior no se cerró correctamente
+- La app no podía conectar porque el puerto 13579 estaba siendo usado por la instancia incorrecta
+
+### Solución:
+- Cerrar todas las instancias de MPC-HC y abrir solo una
+- Verificar con `tasklist | findstr mpc` si hay múltiples procesos
+
+### Lección aprendida:
+- Si MPC-HC "no responde" pero la interfaz web está activada, verificar si hay múltiples instancias corriendo
+- El código de detección automática de monitores funciona correctamente
