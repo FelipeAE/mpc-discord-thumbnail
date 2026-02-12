@@ -181,6 +181,7 @@ export class DiscordService {
   async clearActivity(): Promise<void> {
     try {
       await this.client.user?.clearActivity();
+      Logger.debug('Actividad de Discord limpiada');
     } catch (error) {
       Logger.debug('Error al limpiar actividad');
     }

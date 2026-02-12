@@ -241,3 +241,27 @@ DISCORD_RESTART_THRESHOLD=60   # Reiniciar después de X imágenes únicas (defa
 ### Lección aprendida:
 - Si MPC-HC "no responde" pero la interfaz web está activada, verificar si hay múltiples instancias corriendo
 - El código de detección automática de monitores funciona correctamente
+
+---
+
+## Sesión 2026-02-12: Reloj de Discord (startTimestamp)
+
+### Problema reportado:
+- El reloj de "tiempo jugando" en Discord se reiniciaba a 0 cada vez que se actualizaba el estado (cada 10 segundos)
+- Esto ocurría porque no se enviaba `startTimestamp` en `setActivity()`
+
+### Solución implementada:
+- Agregada variable `playbackStartTimestamp` para mantener el timestamp de inicio
+- Se envía `startTimestamp` en cada llamada a `setActivity()` cuando está reproduciendo
+- El timestamp se establece con `Date.now()` al iniciar reproducción de un archivo
+
+### Comportamiento del reloj ahora:
+- **Solo se reinicia** cuando cambia de archivo/capítulo
+- **Continúa acumulando tiempo** aunque se pause y reanude
+- **Muestra tiempo real viendo**, no la posición del video
+- **No se muestra** cuando está pausado (Discord oculta el reloj sin timestamp)
+
+### Nota sobre caché de Discord:
+- Al limpiar actividad (`clearActivity`), Discord puede tardar en reflejar el cambio visualmente
+- Presionar Ctrl+R en Discord fuerza el refresco de la UI
+- El código funciona correctamente, es solo caché del cliente Discord

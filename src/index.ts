@@ -16,6 +16,8 @@ let updateIntervalMs: number = 10000;
 
 // Para detectar cambio de archivo
 let lastFile: string = '';
+// Timestamp de inicio de reproducción (para que el reloj de Discord no se reinicie)
+let playbackStartTimestamp: number = 0;
 // Para refrescar imagen cuando está pausado
 let pausedSinceTime: number = 0;
 let lastPausedSnapshot: Buffer | null = null; // Guardar snapshot de pausa para re-subir si es necesario
@@ -83,6 +85,13 @@ async function updateLoopInternal(): Promise<void> {
       const pauseDuration = Math.floor((Date.now() - pausedSinceTime) / 1000);
       Logger.info(`Resume detectado después de ${pauseDuration}s de pausa - forzando refresh`);
       await discordService.forceReconnect(); // Reconectar Discord RPC
+      // NO reiniciar timestamp - mantener tiempo acumulado
+    }
+    
+    // Iniciar timestamp de reproducción solo si es nuevo archivo o primera vez
+    if (fileChanged || playbackStartTimestamp === 0) {
+      // Timestamp = ahora (tiempo real viendo, no posición del video)
+      playbackStartTimestamp = Date.now();
     }
     
     // Reset paused timer y snapshot cuando está reproduciendo
@@ -110,7 +119,8 @@ async function updateLoopInternal(): Promise<void> {
       details: cleanFilename(status.file),
       state: `${status.positionString} / ${status.durationString}`,
       largeImageKey: imageUrl,
-      largeImageText: status.file
+      largeImageText: status.file,
+      startTimestamp: playbackStartTimestamp
     });
 
     Logger.info(`Reproduciendo: ${cleanFilename(status.file)} [${status.positionString}]${imageUrl ? '' : ' [SIN IMAGEN]'}`);
@@ -119,6 +129,8 @@ async function updateLoopInternal(): Promise<void> {
     let lastImageUrl = imgurService.getLastUrl();
     lastState = 'paused';
     discordService.setPausedState(true); // Notificar a Discord que está pausado
+    
+    // NO resetear timestamp al pausar - mantener el tiempo acumulado
     
     // Iniciar timer de pausa si no está iniciado
     if (pausedSinceTime === 0) {

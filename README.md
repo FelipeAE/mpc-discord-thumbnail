@@ -8,6 +8,7 @@ Muestra en tu perfil de Discord lo que estás viendo en MPC-HC con thumbnail en 
 
 - Muestra el nombre del archivo que estás reproduciendo
 - Thumbnail en vivo subido a Imgur
+- **Reloj de tiempo viendo** (tiempo real acumulado por archivo)
 - Detecta estados: reproduciendo, pausado, detenido
 - Compresión automática de imágenes (640px, 80% calidad)
 - Detección de cambio de archivo (actualiza thumbnail inmediatamente)
@@ -144,9 +145,11 @@ mpc-discord-thumbnail/
 
 ## Notas
 
-- Los thumbnails se suben a Imgur cada 1 minuto por defecto (configurable)
+- Los thumbnails se suben a Imgur cada 3 minutos por defecto (configurable)
 - La imagen se mantiene cuando pausas el video
 - Al cambiar de archivo, el thumbnail se actualiza inmediatamente
+- El reloj muestra tiempo real viendo (se reinicia solo al cambiar de archivo)
+- El reloj continúa acumulando aunque pauses y reanudes
 - Los logs se guardan en `logs/app-YYYY-MM-DD.log` y se eliminan después de 7 días
 
 ## Licencia
