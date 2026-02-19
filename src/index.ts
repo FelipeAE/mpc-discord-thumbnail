@@ -23,7 +23,7 @@ let pausedSinceTime: number = 0;
 let lastPausedSnapshot: Buffer | null = null; // Guardar snapshot de pausa para re-subir si es necesario
 let pauseRefreshCount: number = 0; // Contador de refreshes durante pausa
 let lastState: string = ''; // Para detectar cambio de estado (paused -> playing)
-const PAUSED_REFRESH_INTERVAL = 180000; // Refrescar imagen cada 3 minutos si está pausado
+const PAUSED_REFRESH_INTERVAL = 120000; // Refrescar imagen cada 2 minutos si está pausado
 const UPDATE_TIMEOUT = 30000; // Timeout máximo para cada ciclo de actualización
 const RESUME_THRESHOLD = 60000; // Si estuvo pausado más de 1 min, forzar refresh al reanudar
 
@@ -276,11 +276,12 @@ async function main(): Promise<void> {
 
   // Inicializar servicios
   mpcService = new MpcHcService(config.mpc.host, config.mpc.port);
-  imgurService = new ImgurService(config.imgur.clientId, config.imgur.uploadInterval);
+  imgurService = new ImgurService(config.imgur.clientId, config.imgur.uploadInterval, config.discord.restartThreshold);
   discordService = new DiscordService(config.discord.clientId);
   imageService = new ImageService(640, 80, config.flipThumbnail, config.flipVertical); // 640px ancho, 80% calidad
 
-  Logger.info(`Imgur: subida cada ${config.imgur.uploadInterval / 1000} segundos`);
+  Logger.info(`Imgur: subida cada ${config.imgur.uploadInterval / 1000} segundos (${config.imgur.uploadInterval / 60000} min)`);
+  Logger.info(`Rate limit estimado: ${config.discord.restartThreshold} imágenes = ${(config.discord.restartThreshold * config.imgur.uploadInterval / 60000)} min`);
   Logger.info('Compresión de imagen: 640px, calidad 80%');
   if (config.flipThumbnail) {
     Logger.info('Flip horizontal activado (fix para multi-monitor)');

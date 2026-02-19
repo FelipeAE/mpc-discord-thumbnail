@@ -11,14 +11,18 @@ export class ImgurService {
   private lastUploadTime: number = 0;
   private uploadInterval: number;
   private uniqueImageCount: number = 0; // Contador de imágenes únicas subidas
+  private sessionStartTime: number = Date.now(); // Tiempo de inicio de sesión
+  private rateLimitThreshold: number; // Umbral de rate limit
 
   /**
    * @param clientId - Imgur Client ID
    * @param uploadIntervalMs - Intervalo mínimo entre subidas en ms (default: 120000 = 2 min)
+   * @param rateLimitThreshold - Umbral de imágenes antes de rate limit (default: 60)
    */
-  constructor(clientId: string, uploadIntervalMs: number = 120000) {
+  constructor(clientId: string, uploadIntervalMs: number = 120000, rateLimitThreshold: number = 60) {
     this.clientId = clientId;
     this.uploadInterval = uploadIntervalMs;
+    this.rateLimitThreshold = rateLimitThreshold;
   }
 
   /**
@@ -83,6 +87,26 @@ export class ImgurService {
         this.lastUrl = `${response.data.data.link}?t=${now}`;
         this.lastUploadTime = now;
         this.uniqueImageCount++; // Incrementar contador de imágenes únicas
+        
+        // Log detallado de progreso hacia rate limit
+        const sessionTimeMs = now - this.sessionStartTime;
+        const sessionTimeMin = Math.floor(sessionTimeMs / 60000);
+        const sessionTimeHours = Math.floor(sessionTimeMin / 60);
+        const sessionTimeMinRemainder = sessionTimeMin % 60;
+        const sessionTimeStr = sessionTimeHours > 0 
+          ? `${sessionTimeHours}h ${sessionTimeMinRemainder}min` 
+          : `${sessionTimeMin}min`;
+        
+        const remainingImages = this.rateLimitThreshold - this.uniqueImageCount;
+        const intervalMin = this.uploadInterval / 60000;
+        const remainingTimeMin = remainingImages * intervalMin;
+        const remainingHours = Math.floor(remainingTimeMin / 60);
+        const remainingMinRemainder = Math.round(remainingTimeMin % 60);
+        const remainingTimeStr = remainingHours > 0 
+          ? `${remainingHours}h ${remainingMinRemainder}min` 
+          : `${remainingMinRemainder}min`;
+        
+        Logger.info(`📊 Imagen #${this.uniqueImageCount}/${this.rateLimitThreshold} | Sesión: ${sessionTimeStr} | Rate limit estimado en: ${remainingTimeStr}`);
         Logger.info(`Imagen subida a Imgur: ${this.lastUrl}`);
         Logger.debug(`Imgur respuesta completa: id=${response.data.data.id}, type=${response.data.data.type}, size=${response.data.data.size || 'N/A'}`);
         return this.lastUrl;
@@ -131,6 +155,7 @@ export class ImgurService {
    */
   resetUniqueImageCount(): void {
     this.uniqueImageCount = 0;
-    Logger.debug('Contador de imágenes únicas reseteado');
+    this.sessionStartTime = Date.now(); // También resetear tiempo de sesión
+    Logger.debug('Contador de imágenes únicas y tiempo de sesión reseteados');
   }
 }

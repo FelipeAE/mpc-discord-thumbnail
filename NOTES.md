@@ -85,8 +85,8 @@ const RESUME_THRESHOLD = 60000; // 1 minuto
 | Parámetro | Valor | Descripción |
 |-----------|-------|-------------|
 | Update interval | 10s | Frecuencia de actualización de Discord |
-| Imgur upload interval | 180s (3 min) | Mínimo entre subidas a Imgur |
-| Paused refresh | 180s (3 min) | Re-subir imagen durante pausa |
+| Imgur upload interval | 120s (2 min) | Mínimo entre subidas a Imgur |
+| Paused refresh | 120s (2 min) | Re-subir imagen durante pausa |
 | Discord reconnect (normal) | 50 updates / 30 min | Reconexión preventiva (más frecuente) |
 | Discord reconnect (pausado) | 5 min | Reconexión más frecuente si pausado |
 | Resume threshold | 1 min | Tiempo mínimo de pausa para forzar refresh al reanudar |
@@ -265,3 +265,77 @@ DISCORD_RESTART_THRESHOLD=60   # Reiniciar después de X imágenes únicas (defa
 - Al limpiar actividad (`clearActivity`), Discord puede tardar en reflejar el cambio visualmente
 - Presionar Ctrl+R en Discord fuerza el refresco de la UI
 - El código funciona correctamente, es solo caché del cliente Discord
+
+---
+
+## Fórmula: Tiempo hasta Rate Limit de Discord
+
+### Datos conocidos:
+- **Rate limit**: ~60-90 URLs externas únicas por sesión de Discord
+- **Umbral configurado**: 60 URLs (DISCORD_RESTART_THRESHOLD)
+
+### Fórmula:
+```
+Tiempo hasta rate limit = URLs únicas × Intervalo de subida (minutos)
+```
+
+### Tabla de referencia (con umbral de 60 URLs):
+
+| Intervalo | Tiempo hasta rate limit |
+|-----------|-------------------------|
+| 1 min     | 60 min = 1 hora         |
+| 2 min     | 120 min = 2 horas       |
+| 3 min     | 180 min = 3 horas       |
+| 4 min     | 240 min = 4 horas       |
+| 5 min     | 300 min = 5 horas       |
+
+### Notas para pruebas:
+- Si `AUTO_RESTART_DISCORD=true`, Discord se reinicia automáticamente al alcanzar el umbral
+- Si `AUTO_RESTART_DISCORD=false`, el thumbnail desaparecerá al alcanzar ~60-90 URLs
+- Para cambiar el intervalo, modificar `IMGUR_UPLOAD_INTERVAL` en .env (en milisegundos)
+
+---
+
+## Sesión 2026-02-13: Logging de progreso hacia rate limit
+
+### Nueva funcionalidad:
+Se agregó logging detallado para rastrear el progreso hacia el rate limit de Discord.
+
+### Formato del log:
+```
+📊 Imagen #12/60 | Sesión: 36min | Rate limit estimado en: 2h 24min
+```
+
+### Log al iniciar:
+```
+Imgur: subida cada 180 segundos (3 min)
+Rate limit estimado: 60 imágenes = 180 min
+```
+
+### Propósito:
+- Verificar en tiempo real si la fórmula de rate limit se cumple
+- Facilitar pruebas con diferentes intervalos de subida
+- Tener datos concretos para ajustar `IMGUR_UPLOAD_INTERVAL`
+
+### Próximos pasos:
+- Monitorear logs con intervalo actual de 2 min
+- ~~Si se confirma la fórmula, probar con 2.5 min o 2 min~~ ✅ Reducido a 2 min
+
+---
+
+## Sesión 2026-02-19: Reducción de intervalo a 2 minutos
+
+### Análisis de logs (Feb 12-19):
+- **8 días de logs, CERO desapariciones de thumbnail**
+- **Máximo alcanzado: 102 imágenes** (Feb 14, 6h 20min) sin problemas
+- Las reconexiones RPC cada ~8 min previenen efectivamente el rate limit
+- El umbral de 60 imágenes es muy conservador — 102 funcionó perfecto
+
+### Cambio realizado:
+- `IMGUR_UPLOAD_INTERVAL`: 180000 → **120000** (3 min → 2 min)
+- `PAUSED_REFRESH_INTERVAL`: 180000 → **120000** (3 min → 2 min)
+
+### Justificación:
+- Con 2 min, se necesitan ~204 min (3.4h) para llegar a 102 imágenes
+- Margen de seguridad amplio dado que 102 imágenes no causaron problemas
+- Thumbnails se actualizarán más rápido al cambiar de capítulo/estado
