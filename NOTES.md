@@ -85,8 +85,8 @@ const RESUME_THRESHOLD = 60000; // 1 minuto
 | Parámetro | Valor | Descripción |
 |-----------|-------|-------------|
 | Update interval | 10s | Frecuencia de actualización de Discord |
-| Imgur upload interval | 120s (2 min) | Mínimo entre subidas a Imgur |
-| Paused refresh | 120s (2 min) | Re-subir imagen durante pausa |
+| Imgur upload interval | 90s (1.5 min) | Mínimo entre subidas a Imgur |
+| Paused refresh | 90s (1.5 min) | Re-subir imagen durante pausa |
 | Discord reconnect (normal) | 50 updates / 30 min | Reconexión preventiva (más frecuente) |
 | Discord reconnect (pausado) | 5 min | Reconexión más frecuente si pausado |
 | Resume threshold | 1 min | Tiempo mínimo de pausa para forzar refresh al reanudar |
@@ -339,3 +339,32 @@ Rate limit estimado: 60 imágenes = 180 min
 - Con 2 min, se necesitan ~204 min (3.4h) para llegar a 102 imágenes
 - Margen de seguridad amplio dado que 102 imágenes no causaron problemas
 - Thumbnails se actualizarán más rápido al cambiar de capítulo/estado
+
+---
+
+## Sesión 2026-02-24: Reducción de intervalo a 90 segundos
+
+### Análisis de logs (Feb 19-24):
+- **CERO desapariciones** de thumbnail en toda la semana
+- **Máximo alcanzado: 183 imágenes** (Feb 23→24, sesión de 13h+) sin problemas
+- `AUTO_RESTART_DISCORD` nunca se activó — las reconexiones RPC cada ~8 min son suficientes
+- El umbral de 60 es muy conservador — 183 imágenes (3× el umbral) funcionó perfecto
+
+### Datos por sesión (intervalo 2 min):
+
+| Fecha | Máx imágenes | Duración sesión | ¿Desapareció? |
+|-------|-------------|-----------------|---------------|
+| Feb 19 | 65 | 7h 6min | ❌ No |
+| Feb 20 | 67 | 8h 37min | ❌ No |
+| Feb 23→24 | 183 | 13h+ | ❌ No |
+| Feb 24 | 53 (nueva) | 2h 41min+ | ❌ No |
+
+### Cambio realizado:
+- `IMGUR_UPLOAD_INTERVAL`: 120000 → **90000** (2 min → 1.5 min)
+- `PAUSED_REFRESH_INTERVAL`: 120000 → **90000** (2 min → 1.5 min)
+
+### Justificación (fórmula: Tiempo = URLs × Intervalo):
+- A 1.5 min, se necesitan ~274 min (4.5h) para llegar a 183 imágenes (máximo probado)
+- Margen de seguridad amplio: 183 imágenes no causaron ningún problema
+- Thumbnails se actualizarán 33% más rápido al cambiar de capítulo/estado
+- Próxima revisión: verificar en unos días si 183+ imágenes siguen sin causar problemas

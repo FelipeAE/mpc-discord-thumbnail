@@ -39,7 +39,7 @@ export function loadConfig(): Config {
     },
     imgur: {
       clientId: getEnvVar('IMGUR_CLIENT_ID'),
-      uploadInterval: getEnvNumber('IMGUR_UPLOAD_INTERVAL', 120000) // 2 min default
+      uploadInterval: getEnvNumber('IMGUR_UPLOAD_INTERVAL', 90000) // 1.5 min default
     },
     discord: {
       clientId: getEnvVar('DISCORD_CLIENT_ID'),

@@ -23,7 +23,7 @@ let pausedSinceTime: number = 0;
 let lastPausedSnapshot: Buffer | null = null; // Guardar snapshot de pausa para re-subir si es necesario
 let pauseRefreshCount: number = 0; // Contador de refreshes durante pausa
 let lastState: string = ''; // Para detectar cambio de estado (paused -> playing)
-const PAUSED_REFRESH_INTERVAL = 120000; // Refrescar imagen cada 2 minutos si está pausado
+const PAUSED_REFRESH_INTERVAL = 90000; // Refrescar imagen cada 1.5 minutos si está pausado
 const UPDATE_TIMEOUT = 30000; // Timeout máximo para cada ciclo de actualización
 const RESUME_THRESHOLD = 60000; // Si estuvo pausado más de 1 min, forzar refresh al reanudar
 
