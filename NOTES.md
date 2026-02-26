@@ -256,8 +256,8 @@ DISCORD_RESTART_THRESHOLD=60   # Reiniciar después de X imágenes únicas (defa
 - El timestamp se establece con `Date.now()` al iniciar reproducción de un archivo
 
 ### Comportamiento del reloj ahora:
-- **Solo se reinicia** cuando cambia de archivo/capítulo
-- **Continúa acumulando tiempo** aunque se pause y reanude
+- **Se reinicia** cuando cambia de archivo/capítulo (independiente del estado de reproducción)
+- **No cuenta tiempo de pausa** - al reanudar, el timer descuenta la duración de la pausa
 - **Muestra tiempo real viendo**, no la posición del video
 - **No se muestra** cuando está pausado (Discord oculta el reloj sin timestamp)
 

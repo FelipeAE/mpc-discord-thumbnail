@@ -74,23 +74,31 @@ async function updateLoopInternal(): Promise<void> {
     Logger.info(`Cambio de archivo detectado: ${cleanFilename(status.file)}`);
     lastFile = status.file;
     lastPausedSnapshot = null; // Reset snapshot al cambiar archivo
+    // Resetear timestamp al cambiar de capítulo (independiente del estado)
+    playbackStartTimestamp = Date.now();
+    Logger.debug('Timestamp reiniciado por cambio de archivo');
   }
 
   if (status.state === 'playing') {
-    // Detectar si viene de una pausa larga (resume)
-    const wasLongPause = lastState === 'paused' && pausedSinceTime > 0 && 
-                         (Date.now() - pausedSinceTime) > RESUME_THRESHOLD;
+    // Detectar si viene de una pausa
+    const wasPaused = lastState === 'paused' && pausedSinceTime > 0;
+    const pauseDurationMs = wasPaused ? Date.now() - pausedSinceTime : 0;
+    const wasLongPause = wasPaused && pauseDurationMs > RESUME_THRESHOLD;
     
     if (wasLongPause) {
-      const pauseDuration = Math.floor((Date.now() - pausedSinceTime) / 1000);
+      const pauseDuration = Math.floor(pauseDurationMs / 1000);
       Logger.info(`Resume detectado después de ${pauseDuration}s de pausa - forzando refresh`);
       await discordService.forceReconnect(); // Reconectar Discord RPC
-      // NO reiniciar timestamp - mantener tiempo acumulado
     }
     
-    // Iniciar timestamp de reproducción solo si es nuevo archivo o primera vez
-    if (fileChanged || playbackStartTimestamp === 0) {
-      // Timestamp = ahora (tiempo real viendo, no posición del video)
+    // Ajustar timestamp para no contar el tiempo de pausa (cualquier duración)
+    if (wasPaused && playbackStartTimestamp > 0) {
+      playbackStartTimestamp += pauseDurationMs;
+      Logger.debug(`Timestamp ajustado: descontados ${Math.floor(pauseDurationMs / 1000)}s de pausa`);
+    }
+    
+    // Iniciar timestamp solo si es primera vez (cambio de archivo ya lo maneja arriba)
+    if (playbackStartTimestamp === 0) {
       playbackStartTimestamp = Date.now();
     }
     
