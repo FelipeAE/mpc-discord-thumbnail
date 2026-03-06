@@ -85,8 +85,8 @@ const RESUME_THRESHOLD = 60000; // 1 minuto
 | Parámetro | Valor | Descripción |
 |-----------|-------|-------------|
 | Update interval | 10s | Frecuencia de actualización de Discord |
-| Imgur upload interval | 90s (1.5 min) | Mínimo entre subidas a Imgur |
-| Paused refresh | 90s (1.5 min) | Re-subir imagen durante pausa |
+| Imgur upload interval | 75s (1 min 15s) | Mínimo entre subidas a Imgur |
+| Paused refresh | 75s (1 min 15s) | Re-subir imagen durante pausa |
 | Discord reconnect (normal) | 50 updates / 30 min | Reconexión preventiva (más frecuente) |
 | Discord reconnect (pausado) | 5 min | Reconexión más frecuente si pausado |
 | Resume threshold | 1 min | Tiempo mínimo de pausa para forzar refresh al reanudar |
@@ -368,3 +368,36 @@ Rate limit estimado: 60 imágenes = 180 min
 - Margen de seguridad amplio: 183 imágenes no causaron ningún problema
 - Thumbnails se actualizarán 33% más rápido al cambiar de capítulo/estado
 - Próxima revisión: verificar en unos días si 183+ imágenes siguen sin causar problemas
+
+---
+
+## Sesión 2026-03-06: Reducción de intervalo a 75 segundos (1 min 15s)
+
+### Análisis de logs (Feb 27 - Mar 6, intervalo 90s):
+- **10 días de logs, CERO desapariciones** de thumbnail
+- **Máximo alcanzado: 357 imágenes** (Mar 5, sesión de 10h+) sin problemas
+- `AUTO_RESTART_DISCORD` nunca se activó — las reconexiones RPC siguen siendo suficientes
+- El umbral de 60 sigue siendo muy conservador — 357 imágenes (6× el umbral) funcionó perfecto
+
+### Datos por sesión (intervalo 90s):
+
+| Fecha | Máx imágenes | Duración sesión | ¿Desapareció? |
+|-------|-------------|-----------------|---------------|
+| Feb 27 | 228 | 10h 30min | ❌ No |
+| Feb 28 | 272 | 10h 10min | ❌ No |
+| Mar 1 | 287 | 12h 28min | ❌ No |
+| Mar 2 | 194 | 11h 30min | ❌ No |
+| Mar 3 | 235 | 10h 8min | ❌ No |
+| Mar 4 | 298 | 10h 22min | ❌ No |
+| Mar 5 | 357 | 10h 3min | ❌ No |
+| Mar 6 | 340 | en curso | ❌ No |
+
+### Cambio realizado:
+- `IMGUR_UPLOAD_INTERVAL`: 90000 → **75000** (1.5 min → 1 min 15s)
+- `PAUSED_REFRESH_INTERVAL`: 90000 → **75000** (1.5 min → 1 min 15s)
+
+### Justificación (fórmula: Tiempo = URLs × Intervalo):
+- A 1 min 15s, se necesitan ~446 min (7.4h) para llegar a 357 imágenes (máximo probado)
+- Margen de seguridad amplio: 357 imágenes no causaron ningún problema
+- Thumbnails se actualizarán 20% más rápido al cambiar de capítulo/estado
+- Próxima revisión: verificar en unos días si el rendimiento se mantiene estable
