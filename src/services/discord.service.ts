@@ -19,6 +19,7 @@ export class DiscordService {
   private lastReconnectTime: number = Date.now();
   private activityCount: number = 0; // Contador de actualizaciones desde última reconexión
   private pausedSince: number = 0; // Timestamp de cuando empezó la pausa
+  private activityActive: boolean = false; // Rastrear si hay una actividad activa en Discord
   private readonly RECONNECT_INTERVAL = 1800000; // 30 minutos máximo sin reconectar
   private readonly RECONNECT_ACTIVITY_COUNT = 50; // Reconectar cada 50 actualizaciones (~8 min a 10s/update)
   private readonly PAUSED_RECONNECT_INTERVAL = 300000; // 5 minutos - reconectar más seguido si está pausado
@@ -151,6 +152,7 @@ export class DiscordService {
         startTimestamp: options.startTimestamp
       });
       this.lastSuccessfulUpdate = Date.now();
+      this.activityActive = true;
       
       // Log detallado del resultado de Discord para debug
       if (result) {
@@ -176,14 +178,29 @@ export class DiscordService {
   }
 
   /**
-   * Limpia la actividad
+   * Limpia la actividad. Si clearActivity() falla silenciosamente,
+   * desconecta el RPC para garantizar que Discord elimine la presencia.
    */
   async clearActivity(): Promise<void> {
+    if (!this.activityActive) {
+      return; // Ya está limpia, no spamear Discord
+    }
+
     try {
-      await this.client.user?.clearActivity();
-      Logger.debug('Actividad de Discord limpiada');
+      if (this.client.user) {
+        await this.client.user.clearActivity();
+        this.activityActive = false;
+        Logger.info('Actividad de Discord limpiada');
+      } else {
+        // client.user es null - clearActivity no funcionará, desconectar RPC
+        Logger.warn('Discord: client.user no disponible, desconectando RPC para limpiar presencia');
+        this.disconnect();
+        this.activityActive = false;
+      }
     } catch (error) {
-      Logger.debug('Error al limpiar actividad');
+      Logger.warn('Error al limpiar actividad, desconectando RPC como fallback');
+      this.disconnect();
+      this.activityActive = false;
     }
   }
 

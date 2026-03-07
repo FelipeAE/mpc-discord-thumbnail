@@ -401,3 +401,33 @@ Rate limit estimado: 60 imágenes = 180 min
 - Margen de seguridad amplio: 357 imágenes no causaron ningún problema
 - Thumbnails se actualizarán 20% más rápido al cambiar de capítulo/estado
 - Próxima revisión: verificar en unos días si el rendimiento se mantiene estable
+
+---
+
+## Sesión 2026-03-07: Bug de persistencia del Rich Presence al cerrar MPC-HC
+
+### Síntoma:
+- Al cerrar MPC-HC, Discord seguía mostrando la actividad "Jugando MPC-HC Player" con el último episodio
+- Los logs mostraban "Actividad de Discord limpiada" cada 10 segundos, pero Discord no la eliminaba
+- La presencia quedaba "fantasma" indefinidamente
+
+### Causa raíz:
+- `clearActivity()` usaba optional chaining: `this.client.user?.clearActivity()`
+- Si `this.client.user` era `null`/`undefined`, la llamada no hacía nada pero **no reportaba error**
+- El log "Actividad de Discord limpiada" se imprimía siempre, dando falsa confianza
+- Además, se llamaba `clearActivity()` cada 10 segundos redundantemente sin verificar si ya estaba limpia
+
+### Solución implementada:
+1. **Flag `activityActive`**: Rastrea si hay una actividad activa en Discord, evita llamadas redundantes
+2. **Verificación de `client.user`**: Si es `null`, desconecta el RPC como fallback (desconectar garantiza que Discord elimine la presencia)
+3. **Fallback en error**: Si `clearActivity()` lanza error, desconecta RPC como último recurso
+4. **Reconexión automática**: Cuando MPC-HC vuelve a estar disponible después de una desconexión, el loop principal reconecta automáticamente a Discord RPC
+
+### Nota sobre presencia residual:
+- Si la presencia ya quedó "pegada" antes del fix, **Ctrl+R en Discord** la elimina inmediatamente
+- Esto es porque la actividad queda en la caché del cliente Discord y una conexión RPC nueva no tiene control sobre ella
+- El fix previene que esto vuelva a ocurrir desconectando el RPC al cerrar MPC-HC
+
+### Archivos modificados:
+- `src/services/discord.service.ts`: `clearActivity()` robusto con fallback de desconexión
+- `src/index.ts`: Reconexión automática cuando MPC-HC reaparece después de estar cerrado

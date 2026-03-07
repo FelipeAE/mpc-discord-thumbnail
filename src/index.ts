@@ -68,6 +68,16 @@ async function updateLoopInternal(): Promise<void> {
     return;
   }
 
+  // Reconectar a Discord si no está conectado (e.g., después de limpiar presencia por MPC-HC cerrado)
+  if (!discordService.isConnected()) {
+    Logger.info('Reconectando a Discord RPC (MPC-HC disponible de nuevo)...');
+    await discordService.connect();
+    if (!discordService.isConnected()) {
+      Logger.debug('Discord no disponible, reintentando en próximo ciclo');
+      return;
+    }
+  }
+
   // Detectar cambio de archivo
   const fileChanged = status.file !== lastFile && status.file !== '';
   if (fileChanged) {
