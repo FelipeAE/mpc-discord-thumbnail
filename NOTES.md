@@ -85,8 +85,8 @@ const RESUME_THRESHOLD = 60000; // 1 minuto
 | Parámetro | Valor | Descripción |
 |-----------|-------|-------------|
 | Update interval | 10s | Frecuencia de actualización de Discord |
-| Imgur upload interval | 75s (1 min 15s) | Mínimo entre subidas a Imgur |
-| Paused refresh | 75s (1 min 15s) | Re-subir imagen durante pausa |
+| Imgur upload interval | 60s (1 min) | Mínimo entre subidas a Imgur |
+| Paused refresh | 60s (1 min) | Re-subir imagen durante pausa |
 | Discord reconnect (normal) | 50 updates / 30 min | Reconexión preventiva (más frecuente) |
 | Discord reconnect (pausado) | 5 min | Reconexión más frecuente si pausado |
 | Resume threshold | 1 min | Tiempo mínimo de pausa para forzar refresh al reanudar |
@@ -431,3 +431,64 @@ Rate limit estimado: 60 imágenes = 180 min
 ### Archivos modificados:
 - `src/services/discord.service.ts`: `clearActivity()` robusto con fallback de desconexión
 - `src/index.ts`: Reconexión automática cuando MPC-HC reaparece después de estar cerrado
+
+---
+
+## Sesión 2026-03-24: Reducción de intervalo a 60 segundos + Limpieza de títulos scene
+
+### Análisis de logs (Mar 17-24, intervalo 75s):
+- **8 días de logs, CERO desapariciones** de thumbnail
+- **Máximo alcanzado: 183 imágenes** (Mar 19) sin problemas
+- Las reconexiones RPC siguen siendo suficientes para prevenir rate limit
+
+### Datos por sesión (intervalo 75s):
+
+| Fecha | Máx imágenes | ¿Desapareció? |
+|-------|-------------|---------------|
+| Mar 17 | 81 | ❌ No |
+| Mar 18 | 88 | ❌ No |
+| Mar 19 | 183 | ❌ No |
+| Mar 20 | 48 | ❌ No |
+| Mar 21 | 113 | ❌ No |
+| Mar 22 | 130 | ❌ No |
+| Mar 23 | 43 | ❌ No |
+| Mar 24 | 58 | ❌ No |
+
+### Cambio 1 - Intervalo reducido:
+- `IMGUR_UPLOAD_INTERVAL`: 75000 → **60000** (1 min 15s → 1 min)
+- `PAUSED_REFRESH_INTERVAL`: 75000 → **60000** (1 min 15s → 1 min)
+
+### Justificación:
+- A 1 min, se necesitan ~183 min (3h) para llegar a 183 imágenes (máximo probado)
+- Margen de seguridad amplio: 183 imágenes no causaron ningún problema
+- Thumbnails se actualizarán 25% más rápido
+
+### Cambio 2 - Limpieza de títulos formato scene:
+Se mejoró `cleanFilename()` para detectar y limpiar nombres de archivo en formato scene (con puntos como separadores).
+
+**Antes:**
+```
+The.Darwin.Incident.S01E12.Sexual.Dimorphism.1080p.AMDL.DUAL.DDP2.0.H.265.MSubs-ToonsHub
+```
+
+**Después:**
+```
+The Darwin Incident - S01E12 - Sexual Dimorphism
+```
+
+### Regex implementado:
+```typescript
+// Detectar formato scene (puntos como separadores con patrón SxxExx)
+const sceneMatch = cleaned.match(/^(.+?)\.(S\d{2}E\d{2})\.(.+?)\.(\d{3,4}p|WEB|HDTV|BluRay)/i);
+if (sceneMatch) {
+  const showName = sceneMatch[1].replace(/\./g, ' ');
+  const episode = sceneMatch[2].toUpperCase();
+  const episodeTitle = sceneMatch[3].replace(/\./g, ' ');
+  cleaned = `${showName} - ${episode} - ${episodeTitle}`;
+}
+```
+
+### Archivos modificados:
+- `src/config.ts`: Intervalo de subida a 60s
+- `src/index.ts`: Intervalo de pausa a 60s
+- `src/utils/helpers.ts`: Regex para limpiar títulos scene

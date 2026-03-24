@@ -62,6 +62,9 @@ export function calculateHash(buffer: Buffer): string {
  * Limpia el nombre del archivo para mostrarlo
  * Ejemplo: "[Erai-raws] Chitose-kun wa Ramune Bin no Naka - 08 [1080p CR WEB-DL AVC AAC][MultiSub][0B350900].mkv"
  * Resultado: "Chitose-kun wa Ramune Bin no Naka - 08"
+ * 
+ * Ejemplo scene: "The.Darwin.Incident.S01E12.Sexual.Dimorphism.1080p.AMDL.DUAL.DDP2.0.H.265.MSubs-ToonsHub.mkv"
+ * Resultado: "The Darwin Incident - S01E12 - Sexual Dimorphism"
  */
 export function cleanFilename(filename: string): string {
   // Remover extensión
@@ -70,12 +73,21 @@ export function cleanFilename(filename: string): string {
   // Remover grupo/fansub al inicio: [Erai-raws], [SubsPlease], etc.
   cleaned = cleaned.replace(/^\[[^\]]+\]\s*/, '');
 
-  // Remover tags técnicos al final: [1080p...], [MultiSub], [hash], (1080p), etc.
-  // Repetir hasta que no haya más tags
-  let previous = '';
-  while (previous !== cleaned) {
-    previous = cleaned;
-    cleaned = cleaned.replace(/\s*[\[\(][^\[\]()]*[\]\)]\s*$/, '');
+  // Detectar formato scene (puntos como separadores con patrón SxxExx)
+  const sceneMatch = cleaned.match(/^(.+?)\.(S\d{2}E\d{2})\.(.+?)\.(\d{3,4}p|WEB|HDTV|BluRay)/i);
+  if (sceneMatch) {
+    const showName = sceneMatch[1].replace(/\./g, ' ');
+    const episode = sceneMatch[2].toUpperCase();
+    const episodeTitle = sceneMatch[3].replace(/\./g, ' ');
+    cleaned = `${showName} - ${episode} - ${episodeTitle}`;
+  } else {
+    // Remover tags técnicos al final: [1080p...], [MultiSub], [hash], (1080p), etc.
+    // Repetir hasta que no haya más tags
+    let previous = '';
+    while (previous !== cleaned) {
+      previous = cleaned;
+      cleaned = cleaned.replace(/\s*[\[\(][^\[\]()]*[\]\)]\s*$/, '');
+    }
   }
 
   // Limpiar espacios extra
