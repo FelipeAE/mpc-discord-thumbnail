@@ -5,7 +5,9 @@ import { DiscordService } from './services/discord.service';
 import { ImageService } from './services/image.service';
 import { cleanFilename, getActiveMonitorCount } from './utils/helpers';
 import Logger from './utils/logger';
-import { exec } from 'child_process';
+import { execFile, spawn } from 'child_process';
+import * as fs from 'fs';
+import * as path from 'path';
 
 let mpcService: MpcHcService;
 let imgurService: ImgurService;
@@ -214,27 +216,39 @@ async function restartDiscord(): Promise<void> {
   discordService.disconnect();
   
   return new Promise((resolve) => {
-    // Matar todos los procesos de Discord
-    exec('taskkill /IM Discord.exe /F', (error) => {
+    // Cerrar Discord con argumentos fijos (sin shell)
+    execFile('taskkill', ['/IM', 'Discord.exe', '/F'], (error) => {
       if (error) {
         Logger.warn('No se pudo cerrar Discord (puede que ya estuviera cerrado)');
       }
       
       // Esperar un momento y reiniciar Discord
       setTimeout(() => {
-        // Buscar Discord en ubicaciones comunes
-        const discordPaths = [
-          `${process.env.LOCALAPPDATA}\\Discord\\Update.exe --processStart Discord.exe`,
-          `${process.env.APPDATA}\\Microsoft\\Windows\\Start Menu\\Programs\\Discord Inc\\Discord.lnk`
-        ];
-        
-        exec(`start "" "${discordPaths[0]}"`, { shell: 'cmd.exe' }, async (err) => {
-          if (err) {
-            Logger.warn('No se pudo iniciar Discord automáticamente. Por favor, ábrelo manualmente.');
-          } else {
-            Logger.info('Discord reiniciado. Esperando reconexión...');
+        let started = false;
+        try {
+          const localAppData = process.env.LOCALAPPDATA;
+          if (localAppData) {
+            const updateExePath = path.join(localAppData, 'Discord', 'Update.exe');
+            if (fs.existsSync(updateExePath)) {
+              const child = spawn(updateExePath, ['--processStart', 'Discord.exe'], {
+                detached: true,
+                stdio: 'ignore'
+              });
+              child.unref();
+              started = true;
+            }
           }
-          
+        } catch (startError) {
+          Logger.warn(`No se pudo iniciar Discord automáticamente: ${(startError as Error).message}`);
+        }
+
+        if (!started) {
+          Logger.warn('No se pudo iniciar Discord automáticamente. Por favor, ábrelo manualmente.');
+        } else {
+          Logger.info('Discord reiniciado. Esperando reconexión...');
+        }
+
+        (async () => {
           // Esperar a que Discord inicie
           await new Promise(r => setTimeout(r, 8000));
           
@@ -248,7 +262,7 @@ async function restartDiscord(): Promise<void> {
           }
           
           resolve();
-        });
+        })();
       }, 2000);
     });
   });

@@ -77,6 +77,7 @@ cp .env.example .env
 # MPC-HC Web Interface
 MPC_HOST=localhost
 MPC_PORT=13579
+ALLOW_REMOTE_MPC=false
 
 # Imgur API
 IMGUR_CLIENT_ID=tu_client_id_aqui
@@ -88,6 +89,14 @@ DISCORD_CLIENT_ID=tu_application_id_aqui
 # Intervalo de actualización en ms
 UPDATE_INTERVAL=15000
 ```
+
+## Seguridad mínima recomendada
+
+- **No subas `.env` ni credenciales** al repositorio (este proyecto ya ignora `.env` en git).
+- **Mantén `MPC_HOST` en localhost**. Por defecto la app bloquea hosts remotos a menos que pongas `ALLOW_REMOTE_MPC=true`.
+- **Ejecuta la app sin permisos de administrador**.
+- **No compartas logs completos** públicamente si contienen errores de APIs.
+- **Actualiza dependencias** con regularidad (`npm audit`, `npm update`).
 
 ## Uso
 

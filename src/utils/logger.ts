@@ -80,32 +80,44 @@ class Logger {
     return new Date().toLocaleString('es-CL');
   }
 
+  private static sanitizeMessage(message: string): string {
+    return message
+      .replace(/(Client-ID\s+)[A-Za-z0-9._-]+/gi, '$1[REDACTED]')
+      .replace(/((?:IMGUR_CLIENT_ID|DISCORD_CLIENT_ID)\s*=\s*)\S+/gi, '$1[REDACTED]')
+      .replace(
+        /((?:access_token|refresh_token|client_secret|password|token)\s*["']?\s*[:=]\s*["']?)[^"',\s}]+/gi,
+        '$1[REDACTED]'
+      );
+  }
+
   private static writeToFile(level: LogLevel, message: string): void {
     this.init();
-    const logLine = `[${this.formatDateTime()}] [${level}] ${message}\n`;
+    const sanitizedMessage = this.sanitizeMessage(message);
+    const logLine = `[${this.formatDateTime()}] [${level}] ${sanitizedMessage}\n`;
     fs.appendFileSync(this.currentLogFile, logLine);
   }
 
   private static log(level: LogLevel, message: string): void {
+    const sanitizedMessage = this.sanitizeMessage(message);
     const time = this.formatTime();
     const prefix = `[${time}] [${level}]`;
 
     // Escribir a archivo
-    this.writeToFile(level, message);
+    this.writeToFile(level, sanitizedMessage);
 
     // Escribir a consola
     switch (level) {
       case LogLevel.ERROR:
-        console.error(`${prefix} ${message}`);
+        console.error(`${prefix} ${sanitizedMessage}`);
         break;
       case LogLevel.WARN:
-        console.warn(`${prefix} ${message}`);
+        console.warn(`${prefix} ${sanitizedMessage}`);
         break;
       case LogLevel.DEBUG:
         // Debug solo a archivo, no a consola
         break;
       default:
-        console.log(`${prefix} ${message}`);
+        console.log(`${prefix} ${sanitizedMessage}`);
     }
   }
 
