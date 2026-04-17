@@ -44,6 +44,14 @@ let lastMonitorCount: number = 1;
 let lastMonitorCheck: number = 0;
 const MONITOR_CHECK_INTERVAL = 60000; // Verificar cada 60 segundos
 
+function buildDiscordState(baseState: string): string {
+  const rateLimitStatus = imgurService.getRateLimitStatus();
+  if (!rateLimitStatus.active) {
+    return baseState;
+  }
+  return `${baseState} | Imgur 429 (${rateLimitStatus.remainingSeconds}s)`;
+}
+
 async function checkMonitorFlip(): Promise<void> {
   if (flipVerticalMode !== 'auto') return;
   
@@ -145,7 +153,7 @@ async function updateLoopInternal(): Promise<void> {
     // Actualizar Discord Rich Presence
     await discordService.setActivity({
       details: cleanFilename(status.file),
-      state: `${status.positionString} / ${status.durationString}`,
+      state: buildDiscordState(`${status.positionString} / ${status.durationString}`),
       largeImageKey: imageUrl,
       largeImageText: status.file,
       startTimestamp: playbackStartTimestamp
@@ -203,7 +211,7 @@ async function updateLoopInternal(): Promise<void> {
     
     await discordService.setActivity({
       details: cleanFilename(status.file),
-      state: `Pausado - ${status.positionString} / ${status.durationString}`,
+      state: buildDiscordState(`Pausado - ${status.positionString} / ${status.durationString}`),
       largeImageKey: lastImageUrl || undefined,
       largeImageText: status.file
     });

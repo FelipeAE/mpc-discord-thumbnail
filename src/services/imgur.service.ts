@@ -9,6 +9,9 @@ export class ImgurService {
   private lastHash: string = '';
   private lastUrl: string = '';
   private lastUploadTime: number = 0;
+  private backoffUntil: number = 0;
+  private consecutiveRateLimitErrors: number = 0;
+  private lastBackoffLogTime: number = 0;
   private uploadInterval: number;
   private uniqueImageCount: number = 0; // Contador de imágenes únicas subidas
   private sessionStartTime: number = Date.now(); // Tiempo de inicio de sesión
@@ -25,6 +28,13 @@ export class ImgurService {
     this.rateLimitThreshold = rateLimitThreshold;
   }
 
+  private getRateLimitBackoffMs(): number {
+    const baseDelay = Math.max(this.uploadInterval, 60000); // mínimo 1 minuto
+    const exponent = Math.min(this.consecutiveRateLimitErrors, 6); // hasta x64
+    const delay = baseDelay * Math.pow(2, exponent);
+    return Math.min(delay, 1800000); // máximo 30 minutos
+  }
+
   /**
    * Sube una imagen a Imgur (respetando el intervalo mínimo)
    * @param imageBuffer - Buffer de la imagen a subir
@@ -35,9 +45,23 @@ export class ImgurService {
   async upload(imageBuffer: Buffer, forceUpload: boolean = false, reason?: string): Promise<string | null> {
     const now = Date.now();
     const timeSinceLastUpload = now - this.lastUploadTime;
-    
     // Cambio de archivo siempre tiene prioridad máxima
     const isFileChange = reason === 'cambio de archivo';
+
+    // Si Imgur está rate-limited, respetar ventana de reintento
+    if (this.backoffUntil > now) {
+      if (now - this.lastBackoffLogTime > 30000) {
+        const remainingSecs = Math.ceil((this.backoffUntil - now) / 1000);
+        Logger.warn(`Imgur rate-limited: reintentando en ${remainingSecs}s`);
+        this.lastBackoffLogTime = now;
+      }
+      // Evitar thumbnail viejo cuando cambió de capítulo y estamos en backoff
+      if (isFileChange) {
+        Logger.warn('Cambio de archivo detectado durante backoff de Imgur: evitando reutilizar thumbnail anterior');
+        return null;
+      }
+      return this.lastUrl || null;
+    }
 
     // Si ya tenemos una URL, no es forzado, y no ha pasado el intervalo, reutilizar
     if (!forceUpload && this.lastUrl && timeSinceLastUpload < this.uploadInterval) {
@@ -82,6 +106,8 @@ export class ImgurService {
       );
 
       if (response.data.success) {
+        this.backoffUntil = 0;
+        this.consecutiveRateLimitErrors = 0;
         this.lastHash = currentHash;
         // Agregar timestamp para evitar cache de Discord
         this.lastUrl = `${response.data.data.link}?t=${now}`;
@@ -113,17 +139,30 @@ export class ImgurService {
       }
 
       Logger.error(`Imgur respondió con error: ${JSON.stringify(response.data)}`);
-      return this.lastUrl || null;
+      return isFileChange ? null : (this.lastUrl || null);
     } catch (error) {
-      const axiosError = error as any;
-      if (axiosError.response) {
-        Logger.error(`Error Imgur HTTP ${axiosError.response.status}: ${JSON.stringify(axiosError.response.data)}`);
-      } else if (axiosError.code) {
-        Logger.error(`Error Imgur red: ${axiosError.code} - ${axiosError.message}`);
+      if (axios.isAxiosError(error)) {
+        const status = error.response?.status;
+        if (status === 429) {
+          this.consecutiveRateLimitErrors++;
+          const backoffMs = this.getRateLimitBackoffMs();
+          this.backoffUntil = now + backoffMs;
+          this.lastUploadTime = now;
+          Logger.warn(`Imgur HTTP 429: aplicando backoff de ${Math.ceil(backoffMs / 1000)}s`);
+          return isFileChange ? null : (this.lastUrl || null);
+        }
+
+        if (status) {
+          Logger.error(`Error Imgur HTTP ${status}: ${JSON.stringify(error.response?.data)}`);
+        } else if (error.code) {
+          Logger.error(`Error Imgur red: ${error.code} - ${error.message}`);
+        } else {
+          Logger.error(`Error Imgur: ${error.message}`);
+        }
       } else {
         Logger.error('Error al subir a Imgur', error as Error);
       }
-      return this.lastUrl || null;
+      return isFileChange ? null : (this.lastUrl || null);
     }
   }
 
@@ -135,12 +174,26 @@ export class ImgurService {
   }
 
   /**
+   * Estado actual del backoff por rate limit (HTTP 429)
+   */
+  getRateLimitStatus(): { active: boolean; remainingSeconds: number } {
+    const remainingMs = Math.max(0, this.backoffUntil - Date.now());
+    return {
+      active: remainingMs > 0,
+      remainingSeconds: Math.ceil(remainingMs / 1000)
+    };
+  }
+
+  /**
    * Resetea el estado (útil cuando cambia el archivo)
    */
   reset(): void {
     this.lastHash = '';
     this.lastUrl = '';
     this.lastUploadTime = 0;
+    this.backoffUntil = 0;
+    this.consecutiveRateLimitErrors = 0;
+    this.lastBackoffLogTime = 0;
   }
 
   /**
