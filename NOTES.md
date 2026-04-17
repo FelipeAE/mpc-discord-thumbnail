@@ -145,6 +145,8 @@ npm run build && npm restart
 ```
 Esto compila TypeScript y reinicia el servicio con PM2 para aplicar los cambios.
 
+**Regla operativa (Copilot CLI):** al terminar cualquier cambio de código en esta sesión, ejecutar siempre `npm restart` (idealmente junto con `npm run build`).
+
 ---
 
 ## Sesión 2025-12-25: Avances y descubrimientos
@@ -492,3 +494,56 @@ if (sceneMatch) {
 - `src/config.ts`: Intervalo de subida a 60s
 - `src/index.ts`: Intervalo de pausa a 60s
 - `src/utils/helpers.ts`: Regex para limpiar títulos scene
+
+---
+
+## Sesión 2026-04-14: Fix reloj acumulado en pausas largas
+
+### Problema reportado:
+- El reloj verde de Discord seguía acumulando tiempo aunque el capítulo no se estuviera reproduciendo.
+- Al retomar el mismo capítulo mucho después, el contador mostraba tiempos inflados (horas) hasta que se estabilizaba.
+
+### Causa raíz:
+- `startTimestamp` se mantenía como un timestamp de sesión y dependía de detectar transiciones `paused -> playing`.
+- Si MPC-HC/Discord quedaban desincronizados en estado durante pausas largas, el reloj podía seguir corriendo.
+
+### Solución implementada:
+- El `startTimestamp` ahora se calcula en cada update usando la posición real del video:
+```typescript
+const playbackStartTimestamp = Date.now() - status.position;
+```
+- Así el reloj queda anclado al progreso real del capítulo y deja de acumular tiempo "fantasma".
+
+### Archivo modificado:
+- `src/index.ts`: cálculo de `startTimestamp` basado en `status.position`
+
+### Ajuste posterior (mismo día):
+- Se cambió a un enfoque de **tiempo reproducido acumulado** (no posición del capítulo):
+  - Acumula solo cuando `status.state === 'playing'`
+  - Se congela en pausa, detenido o MPC-HC no disponible
+  - Al retomar el mismo capítulo, continúa desde el tiempo acumulado previo
+  - Se resetea únicamente al cambiar de archivo/capítulo
+
+---
+
+## Sesión 2026-04-17: Fix de capítulo "pegado" en Discord
+
+### Problema reportado:
+- En algunos cambios de capítulo/archivo, Discord se quedaba mostrando el episodio anterior.
+- En logs aparecía `INVALID_PAYLOAD` al enviar actividad.
+
+### Causa raíz:
+- `largeImageText` se enviaba con `status.file` completo.
+- Algunos nombres de archivo superaban el límite de Discord (128 chars), provocando error y fallando `setActivity()`.
+- Al fallar updates seguidos, la presencia podía quedar desactualizada visualmente.
+
+### Solución implementada:
+- Se agregó truncado defensivo a todos los textos de presencia antes de `setActivity()`:
+  - `details`
+  - `state`
+  - `largeImageText`
+  - `smallImageText`
+- Nuevo helper interno en `DiscordService`: `truncateForDiscord()` con límite de 128 chars.
+
+### Archivo modificado:
+- `src/services/discord.service.ts`

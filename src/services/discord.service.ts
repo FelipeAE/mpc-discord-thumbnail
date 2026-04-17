@@ -23,6 +23,7 @@ export class DiscordService {
   private readonly RECONNECT_INTERVAL = 1800000; // 30 minutos máximo sin reconectar
   private readonly RECONNECT_ACTIVITY_COUNT = 50; // Reconectar cada 50 actualizaciones (~8 min a 10s/update)
   private readonly PAUSED_RECONNECT_INTERVAL = 300000; // 5 minutos - reconectar más seguido si está pausado
+  private readonly DISCORD_TEXT_LIMIT = 128;
 
   constructor(clientId: string) {
     this.clientId = clientId;
@@ -141,14 +142,19 @@ export class DiscordService {
     }
 
     try {
+      const details = this.truncateForDiscord(options.details);
+      const state = this.truncateForDiscord(options.state);
+      const largeImageText = this.truncateForDiscord(options.largeImageText || options.details);
+      const smallImageText = this.truncateForDiscord(options.smallImageText);
+
       Logger.debug(`Discord: enviando imagen ${options.largeImageKey || 'ninguna'}`);
       const result = await this.client.user?.setActivity({
-        details: options.details,
-        state: options.state,
+        details,
+        state,
         largeImageKey: options.largeImageKey,
-        largeImageText: options.largeImageText || options.details,
+        largeImageText,
         smallImageKey: options.smallImageKey,
-        smallImageText: options.smallImageText,
+        smallImageText,
         startTimestamp: options.startTimestamp
       });
       this.lastSuccessfulUpdate = Date.now();
@@ -217,5 +223,12 @@ export class DiscordService {
    */
   isConnected(): boolean {
     return this.connected;
+  }
+
+  private truncateForDiscord(text?: string): string | undefined {
+    if (!text) return undefined;
+    return text.length > this.DISCORD_TEXT_LIMIT
+      ? `${text.substring(0, this.DISCORD_TEXT_LIMIT - 3)}...`
+      : text;
   }
 }

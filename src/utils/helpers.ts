@@ -1,5 +1,5 @@
 import * as crypto from 'crypto';
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 
 /**
  * Detecta la cantidad de monitores activos (Windows)
@@ -8,15 +8,26 @@ import { exec } from 'child_process';
  */
 export async function getActiveMonitorCount(): Promise<number> {
   return new Promise((resolve) => {
-    const cmd = 'powershell -WindowStyle Hidden -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Screen]::AllScreens.Count"';
-    exec(cmd, { timeout: 5000, windowsHide: true }, (error, stdout) => {
+    execFile(
+      'powershell',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-WindowStyle',
+        'Hidden',
+        '-Command',
+        'Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Screen]::AllScreens.Count'
+      ],
+      { timeout: 5000, windowsHide: true },
+      (error, stdout) => {
       if (error) {
         resolve(1); // Default a 1 si falla
         return;
       }
       const count = parseInt(stdout.trim(), 10);
       resolve(isNaN(count) ? 1 : count);
-    });
+      }
+    );
   });
 }
 

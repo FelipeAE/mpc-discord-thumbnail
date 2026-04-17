@@ -18,13 +18,16 @@ let updateIntervalMs: number = 10000;
 
 // Para detectar cambio de archivo
 let lastFile: string = '';
-// Timestamp de inicio de reproducción (para que el reloj de Discord no se reinicie)
-let playbackStartTimestamp: number = 0;
+// Tiempo real acumulado reproduciendo el archivo actual (no cuenta pausas)
+let playbackElapsedMs: number = 0;
+let lastPlayingTickMs: number = 0;
+let lastPlayingPositionMs: number = 0;
 // Para refrescar imagen cuando está pausado
 let pausedSinceTime: number = 0;
 let lastPausedSnapshot: Buffer | null = null; // Guardar snapshot de pausa para re-subir si es necesario
 let pauseRefreshCount: number = 0; // Contador de refreshes durante pausa
 let lastState: string = ''; // Para detectar cambio de estado (paused -> playing)
+const PLAYBACK_POSITION_TOLERANCE_MS = 1500; // Tolerancia por jitter de posición/reportes
 const PAUSED_REFRESH_INTERVAL = 60000; // Refrescar imagen cada 1 min si está pausado
 const UPDATE_TIMEOUT = 30000; // Timeout máximo para cada ciclo de actualización
 const RESUME_THRESHOLD = 60000; // Si estuvo pausado más de 1 min, forzar refresh al reanudar
@@ -65,6 +68,7 @@ async function updateLoopInternal(): Promise<void> {
   const status = await mpcService.getStatus();
 
   if (!status) {
+    lastPlayingTickMs = 0; // Congelar contador si MPC-HC no responde
     Logger.debug('MPC-HC no disponible');
     await discordService.clearActivity();
     return;
@@ -86,9 +90,9 @@ async function updateLoopInternal(): Promise<void> {
     Logger.info(`Cambio de archivo detectado: ${cleanFilename(status.file)}`);
     lastFile = status.file;
     lastPausedSnapshot = null; // Reset snapshot al cambiar archivo
-    // Resetear timestamp al cambiar de capítulo (independiente del estado)
-    playbackStartTimestamp = Date.now();
-    Logger.debug('Timestamp reiniciado por cambio de archivo');
+    playbackElapsedMs = 0;
+    lastPlayingTickMs = 0;
+    lastPlayingPositionMs = 0;
   }
 
   if (status.state === 'playing') {
@@ -103,16 +107,20 @@ async function updateLoopInternal(): Promise<void> {
       await discordService.forceReconnect(); // Reconectar Discord RPC
     }
     
-    // Ajustar timestamp para no contar el tiempo de pausa (cualquier duración)
-    if (wasPaused && playbackStartTimestamp > 0) {
-      playbackStartTimestamp += pauseDurationMs;
-      Logger.debug(`Timestamp ajustado: descontados ${Math.floor(pauseDurationMs / 1000)}s de pausa`);
+    const now = Date.now();
+    if (lastState !== 'playing' || lastPlayingTickMs === 0) {
+      // Primer tick de reproducción (o resume): iniciar referencia sin sumar de golpe.
+      lastPlayingTickMs = now;
+      lastPlayingPositionMs = status.position;
+    } else {
+      const wallDelta = now - lastPlayingTickMs;
+      const positionDelta = Math.max(0, status.position - lastPlayingPositionMs);
+      const elapsedIncrement = Math.min(wallDelta, positionDelta + PLAYBACK_POSITION_TOLERANCE_MS);
+      playbackElapsedMs += Math.max(0, elapsedIncrement);
+      lastPlayingTickMs = now;
+      lastPlayingPositionMs = status.position;
     }
-    
-    // Iniciar timestamp solo si es primera vez (cambio de archivo ya lo maneja arriba)
-    if (playbackStartTimestamp === 0) {
-      playbackStartTimestamp = Date.now();
-    }
+    const playbackStartTimestamp = now - playbackElapsedMs;
     
     // Reset paused timer y snapshot cuando está reproduciendo
     pausedSinceTime = 0;
@@ -148,6 +156,8 @@ async function updateLoopInternal(): Promise<void> {
     const now = Date.now();
     let lastImageUrl = imgurService.getLastUrl();
     lastState = 'paused';
+    lastPlayingTickMs = 0; // Congelar contador durante pausa
+    lastPlayingPositionMs = status.position;
     discordService.setPausedState(true); // Notificar a Discord que está pausado
     
     // NO resetear timestamp al pausar - mantener el tiempo acumulado
@@ -200,6 +210,8 @@ async function updateLoopInternal(): Promise<void> {
     Logger.info(`Pausado: ${cleanFilename(status.file)}${lastImageUrl ? '' : ' [SIN IMAGEN]'}`);
   } else {
     lastState = 'stopped';
+    lastPlayingTickMs = 0;
+    lastPlayingPositionMs = 0;
     discordService.setPausedState(false);
     await discordService.clearActivity();
     Logger.debug('Detenido');
@@ -349,8 +361,7 @@ async function main(): Promise<void> {
   // Conectar a Discord
   const discordConnected = await discordService.connect();
   if (!discordConnected) {
-    Logger.error('No se pudo conectar a Discord. Asegúrate de que Discord esté abierto.');
-    process.exit(1);
+    Logger.warn('No se pudo conectar a Discord al iniciar. Se reintentará automáticamente en el loop.');
   }
 
   // Iniciar loop de actualización
