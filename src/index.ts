@@ -1,51 +1,144 @@
 import { loadConfig } from './config';
 import { MpcHcService } from './services/mpc-hc.service';
-import { ImgurService } from './services/imgur.service';
+import { MpvService } from './services/mpv.service';
+import { VlcService } from './services/vlc.service';
+import { UploadService } from './services/upload.service';
 import { DiscordService } from './services/discord.service';
 import { ImageService } from './services/image.service';
-import { cleanFilename, getActiveMonitorCount } from './utils/helpers';
+import { AnilistService } from './services/anilist.service';
+import { HistoryService } from './services/history.service';
+import { cleanFilename, getActiveMonitorCount, parseAnimeFilename } from './utils/helpers';
+import { showWindowsNotification } from './utils/notifier';
 import Logger from './utils/logger';
 import { execFile, spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
+import { UploadReason, PlayerService, PlayerStatus } from './types';
+import { promisify } from 'util';
 
-let mpcService: MpcHcService;
-let imgurService: ImgurService;
+const execFileAsync = promisify(execFile);
+
+// Clase para encapsular todo el estado mutable de la aplicación
+class AppState {
+  // Para detectar cambio de archivo
+  lastFile: string = '';
+  
+  // Tiempo real acumulado reproduciendo el archivo actual (no cuenta pausas)
+  playbackElapsedMs: number = 0;
+  lastPlayingTickMs: number = 0;
+  lastPlayingPositionMs: number = 0;
+  
+  // Para refrescar imagen cuando está pausado
+  pausedSinceTime: number = 0;
+  lastPausedSnapshot: Buffer | null = null; // Guardar snapshot de pausa para re-subir
+  pauseRefreshCount: number = 0; // Contador de refreshes durante pausa
+  lastState: string = ''; // Para detectar cambio de estado (paused -> playing)
+  
+  // Historial de capturas para Smart Thumbnail (Feature 10)
+  snapshotHistory: Array<{ buffer: Buffer; brightness: number }> = [];
+  
+  // Configuración dinámica
+  isRunning: boolean = true;
+  updateIntervalMs: number = 10000;
+  autoRestartDiscord: boolean = false;
+  discordRestartThreshold: number = 60;
+  defaultButtons?: Array<{ label: string; url: string }>;
+  
+  // Para detección automática de monitores
+  flipVerticalMode: boolean | 'auto' = 'auto';
+  lastMonitorCount: number = 1;
+  lastMonitorCheck: number = 0;
+
+  resetForNewFile(filename: string): void {
+    this.lastFile = filename;
+    this.lastPausedSnapshot = null;
+    this.playbackElapsedMs = 0;
+    this.lastPlayingTickMs = 0;
+    this.lastPlayingPositionMs = 0;
+    this.snapshotHistory = []; // Limpiar historial de Smart Thumbnail para el nuevo archivo
+  }
+
+  resetForPause(now: number, compressedSnapshot: Buffer | null): void {
+    this.pausedSinceTime = now;
+    this.pauseRefreshCount = 0;
+    this.lastPausedSnapshot = compressedSnapshot;
+  }
+
+  resetForPlaying(): void {
+    this.pausedSinceTime = 0;
+    this.lastPausedSnapshot = null;
+    this.pauseRefreshCount = 0;
+    this.lastState = 'playing';
+  }
+
+  /**
+   * Agrega un snapshot al historial de Smart Thumbnail
+   */
+  addSnapshot(buffer: Buffer, brightness: number): void {
+    this.snapshotHistory.push({ buffer, brightness });
+    if (this.snapshotHistory.length > 3) {
+      this.snapshotHistory.shift(); // Mantener solo las últimas 3 capturas
+    }
+  }
+
+  /**
+   * Obtiene la mejor captura (evita escenas oscuras en transiciones)
+   */
+  getBestSnapshot(currentBuffer: Buffer, currentBrightness: number): Buffer {
+    // Si la captura actual tiene buen brillo (>= 40 de 255), la usamos y la guardamos
+    if (currentBrightness >= 40) {
+      this.addSnapshot(currentBuffer, currentBrightness);
+      return currentBuffer;
+    }
+    
+    // Si es muy oscura, intentamos buscar una mejor en el historial reciente
+    let best = { buffer: currentBuffer, brightness: currentBrightness };
+    for (const snap of this.snapshotHistory) {
+      if (snap.brightness > best.brightness) {
+        best = snap;
+      }
+    }
+    
+    if (best.brightness > currentBrightness) {
+      Logger.debug(`Smart Thumbnail: Reemplazado frame oscuro (${Math.round(currentBrightness)}) por uno más claro del historial (${Math.round(best.brightness)})`);
+      return best.buffer;
+    }
+    
+    // Si no hay nada mejor, usar la actual y guardarla
+    this.addSnapshot(currentBuffer, currentBrightness);
+    return currentBuffer;
+  }
+}
+
+const state = new AppState();
+
+let uploadService: UploadService;
 let discordService: DiscordService;
 let imageService: ImageService;
-let isRunning: boolean = true;
-let updateIntervalMs: number = 10000;
+let anilistService: AnilistService;
+let historyService: HistoryService;
+let trayProcess: any = null;
 
-// Para detectar cambio de archivo
-let lastFile: string = '';
-// Tiempo real acumulado reproduciendo el archivo actual (no cuenta pausas)
-let playbackElapsedMs: number = 0;
-let lastPlayingTickMs: number = 0;
-let lastPlayingPositionMs: number = 0;
-// Para refrescar imagen cuando está pausado
-let pausedSinceTime: number = 0;
-let lastPausedSnapshot: Buffer | null = null; // Guardar snapshot de pausa para re-subir si es necesario
-let pauseRefreshCount: number = 0; // Contador de refreshes durante pausa
-let lastState: string = ''; // Para detectar cambio de estado (paused -> playing)
+// Lista de reproductores soportados en orden de prioridad
+let players: PlayerService[] = [];
+let activePlayer: PlayerService | null = null;
+
 const PLAYBACK_POSITION_TOLERANCE_MS = 1500; // Tolerancia por jitter de posición/reportes
-const PAUSED_REFRESH_INTERVAL = 60000; // Refrescar imagen cada 1 min si está pausado
+const PAUSED_REFRESH_INTERVAL = 300000; // Refrescar imagen cada 5 min si está pausado
+const PAUSED_REFRESH_START_DELAY = 180000; // Empezar refresh de pausa después de 3 min
 const UPDATE_TIMEOUT = 30000; // Timeout máximo para cada ciclo de actualización
 const RESUME_THRESHOLD = 60000; // Si estuvo pausado más de 1 min, forzar refresh al reanudar
+const RESUME_FORCE_UPLOAD_DEBOUNCE_MS = 120000; // No forzar subida en resume si hubo una reciente
 
-// Configuración de reinicio automático de Discord
-let autoRestartDiscord: boolean = false;
-let discordRestartThreshold: number = 60;
+// Timeouts para reinicio de Discord
+const DISCORD_KILL_DELAY_MS = 2000; // Espera después de matar el proceso
+const DISCORD_STARTUP_WAIT_MS = 8000; // Espera para que Discord inicie
 
-// Para detección automática de monitores
-let flipVerticalMode: boolean | 'auto' = 'auto';
-let lastMonitorCount: number = 1;
-
-// Cache de detección de monitores (no verificar en cada ciclo)
-let lastMonitorCheck: number = 0;
+// Cache de detección de monitores
 const MONITOR_CHECK_INTERVAL = 60000; // Verificar cada 60 segundos
 
 function buildDiscordState(baseState: string): string {
-  const rateLimitStatus = imgurService.getRateLimitStatus();
+  const rateLimitStatus = uploadService.getRateLimitStatus();
   if (!rateLimitStatus.active) {
     return baseState;
   }
@@ -53,38 +146,74 @@ function buildDiscordState(baseState: string): string {
 }
 
 async function checkMonitorFlip(): Promise<void> {
-  if (flipVerticalMode !== 'auto') return;
+  if (state.flipVerticalMode !== 'auto') return;
   
-  // Solo verificar cada MONITOR_CHECK_INTERVAL
   const now = Date.now();
-  if (now - lastMonitorCheck < MONITOR_CHECK_INTERVAL) return;
-  lastMonitorCheck = now;
+  if (now - state.lastMonitorCheck < MONITOR_CHECK_INTERVAL) return;
+  state.lastMonitorCheck = now;
   
   const monitorCount = await getActiveMonitorCount();
-  if (monitorCount !== lastMonitorCount) {
-    lastMonitorCount = monitorCount;
+  if (monitorCount !== state.lastMonitorCount) {
+    state.lastMonitorCount = monitorCount;
     const shouldFlip = monitorCount > 1;
     imageService.setFlipVertical(shouldFlip);
     Logger.info(`Monitores activos: ${monitorCount} - Flip vertical: ${shouldFlip ? 'activado' : 'desactivado'}`);
   }
 }
 
+async function detectPlayer(): Promise<PlayerService | null> {
+  // Si el reproductor activo sigue conectado, mantenerlo
+  if (activePlayer && (await activePlayer.isConnected())) {
+    return activePlayer;
+  }
+
+  // Si se desconectó, avisar
+  if (activePlayer) {
+    Logger.info(`Reproductor "${activePlayer.name}" se ha desconectado.`);
+    showWindowsNotification("Reproductor Desconectado", `Se cerró la sesión con ${activePlayer.name}`);
+    activePlayer = null;
+    historyService.endSession();
+  }
+
+  // Buscar el primer reproductor disponible
+  for (const player of players) {
+    if (await player.isConnected()) {
+      activePlayer = player;
+      Logger.info(`¡Conectado al reproductor: "${player.name}"!`);
+      showWindowsNotification("Reproductor Conectado", `Vinculado exitosamente con ${player.name}`);
+      return player;
+    }
+  }
+
+  return null;
+}
+
 async function updateLoopInternal(): Promise<void> {
   // Verificar monitores para flip automático
   await checkMonitorFlip();
   
-  const status = await mpcService.getStatus();
+  // Auto-detectar reproductor activo
+  const player = await detectPlayer();
 
-  if (!status) {
-    lastPlayingTickMs = 0; // Congelar contador si MPC-HC no responde
-    Logger.debug('MPC-HC no disponible');
+  if (!player) {
+    state.lastPlayingTickMs = 0; // Congelar contador
+    Logger.debug('Ningún reproductor activo detectado (MPC-HC, mpv o VLC)');
     await discordService.clearActivity();
     return;
   }
 
-  // Reconectar a Discord si no está conectado (e.g., después de limpiar presencia por MPC-HC cerrado)
+  const status = await player.getStatus();
+
+  if (!status) {
+    state.lastPlayingTickMs = 0;
+    Logger.debug(`No se pudo obtener el estado de ${player.name}`);
+    await discordService.clearActivity();
+    return;
+  }
+
+  // Reconectar a Discord si no está conectado
   if (!discordService.isConnected()) {
-    Logger.info('Reconectando a Discord RPC (MPC-HC disponible de nuevo)...');
+    Logger.info('Reconectando a Discord RPC...');
     await discordService.connect();
     if (!discordService.isConnected()) {
       Logger.debug('Discord no disponible, reintentando en próximo ciclo');
@@ -93,60 +222,95 @@ async function updateLoopInternal(): Promise<void> {
   }
 
   // Detectar cambio de archivo
-  const fileChanged = status.file !== lastFile && status.file !== '';
+  const fileChanged = status.file !== state.lastFile && status.file !== '';
   if (fileChanged) {
     Logger.info(`Cambio de archivo detectado: ${cleanFilename(status.file)}`);
-    lastFile = status.file;
-    lastPausedSnapshot = null; // Reset snapshot al cambiar archivo
-    playbackElapsedMs = 0;
-    lastPlayingTickMs = 0;
-    lastPlayingPositionMs = 0;
+    state.resetForNewFile(status.file);
+    historyService.startSession(status.file);
   }
 
   if (status.state === 'playing') {
+    const now = Date.now();
     // Detectar si viene de una pausa
-    const wasPaused = lastState === 'paused' && pausedSinceTime > 0;
-    const pauseDurationMs = wasPaused ? Date.now() - pausedSinceTime : 0;
+    const wasPaused = state.lastState === 'paused' && state.pausedSinceTime > 0;
+    const pauseDurationMs = wasPaused ? now - state.pausedSinceTime : 0;
     const wasLongPause = wasPaused && pauseDurationMs > RESUME_THRESHOLD;
+    const lastUploadAgeMs = uploadService.getLastUploadAgeMs();
+    const shouldForceResumeUpload = wasLongPause
+      && (lastUploadAgeMs === null || lastUploadAgeMs >= RESUME_FORCE_UPLOAD_DEBOUNCE_MS);
     
     if (wasLongPause) {
       const pauseDuration = Math.floor(pauseDurationMs / 1000);
-      Logger.info(`Resume detectado después de ${pauseDuration}s de pausa - forzando refresh`);
+      Logger.info(`Resume detectado después de ${pauseDuration}s de pausa - forzando reconexión de Discord`);
       await discordService.forceReconnect(); // Reconectar Discord RPC
+      if (!shouldForceResumeUpload && lastUploadAgeMs !== null) {
+        Logger.info(`Debounce de resume activo: omitiendo subida forzada (última subida hace ${Math.floor(lastUploadAgeMs / 1000)}s)`);
+      }
     }
     
-    const now = Date.now();
-    if (lastState !== 'playing' || lastPlayingTickMs === 0) {
-      // Primer tick de reproducción (o resume): iniciar referencia sin sumar de golpe.
-      lastPlayingTickMs = now;
-      lastPlayingPositionMs = status.position;
+    if (state.lastState !== 'playing' || state.lastPlayingTickMs === 0) {
+      state.lastPlayingTickMs = now;
+      state.lastPlayingPositionMs = status.position;
     } else {
-      const wallDelta = now - lastPlayingTickMs;
-      const positionDelta = Math.max(0, status.position - lastPlayingPositionMs);
+      const wallDelta = now - state.lastPlayingTickMs;
+      const positionDelta = Math.max(0, status.position - state.lastPlayingPositionMs);
       const elapsedIncrement = Math.min(wallDelta, positionDelta + PLAYBACK_POSITION_TOLERANCE_MS);
-      playbackElapsedMs += Math.max(0, elapsedIncrement);
-      lastPlayingTickMs = now;
-      lastPlayingPositionMs = status.position;
+      state.playbackElapsedMs += Math.max(0, elapsedIncrement);
+      state.lastPlayingTickMs = now;
+      state.lastPlayingPositionMs = status.position;
     }
-    const playbackStartTimestamp = now - playbackElapsedMs;
+    const playbackStartTimestamp = now - state.playbackElapsedMs;
+    
+    // Actualizar historial local de reproducción
+    historyService.updateProgress(state.playbackElapsedMs);
     
     // Reset paused timer y snapshot cuando está reproduciendo
-    pausedSinceTime = 0;
-    lastPausedSnapshot = null;
-    pauseRefreshCount = 0;
-    lastState = 'playing';
-    discordService.setPausedState(false); // Notificar a Discord que no está pausado
+    state.resetForPlaying();
+    discordService.setPausedState(false);
     
-    // Capturar snapshot
-    const snapshot = await mpcService.getSnapshot();
+    // 1. Obtener metadata de AniList para enriquecer la presencia
+    let smallImageUrl: string | undefined;
+    let smallImageText: string = status.file;
+    let buttons: Array<{ label: string; url: string }> | undefined;
 
-    let imageUrl: string | undefined = imgurService.getLastUrl() || undefined;
+    const parsedAnime = parseAnimeFilename(status.file);
+    let anilistInfo = null;
+    if (parsedAnime) {
+      anilistInfo = await anilistService.searchAnime(parsedAnime.title);
+    }
+
+    if (anilistInfo) {
+      smallImageUrl = anilistInfo.coverImage.large;
+      smallImageText = anilistInfo.title.english || anilistInfo.title.romaji;
+      
+      buttons = [{ label: 'Ver en AniList', url: anilistInfo.siteUrl }];
+      
+      if (state.defaultButtons) {
+        for (const btn of state.defaultButtons) {
+          if (buttons.length < 2) {
+            buttons.push(btn);
+          }
+        }
+      }
+    } else {
+      if (state.defaultButtons) {
+        buttons = [...state.defaultButtons];
+      }
+    }
+
+    // 2. Captura y subida del thumbnail en vivo (función principal)
+    const snapshot = await player.getSnapshot();
+    let imageUrl: string | undefined = uploadService.getLastUrl() || undefined;
+    
     if (snapshot) {
-      // Comprimir imagen antes de subir
       const compressed = await imageService.compress(snapshot);
-      // Subir (forzar si cambió el archivo O si viene de pausa larga)
-      const forceReason = fileChanged ? 'cambio de archivo' : (wasLongPause ? 'resume después de pausa' : undefined);
-      const url = await imgurService.upload(compressed, fileChanged || wasLongPause, forceReason);
+      const brightness = await imageService.getBrightness(compressed);
+      
+      // Smart Thumbnail: Elegir la mejor captura si la actual es muy oscura
+      const bestSnapshot = state.getBestSnapshot(compressed, brightness);
+      
+      const forceReason = fileChanged ? UploadReason.FILE_CHANGE : (shouldForceResumeUpload ? UploadReason.RESUME : undefined);
+      const url = await uploadService.upload(bestSnapshot, fileChanged || shouldForceResumeUpload, forceReason);
       if (url) imageUrl = url;
     }
 
@@ -154,57 +318,86 @@ async function updateLoopInternal(): Promise<void> {
     await discordService.setActivity({
       details: cleanFilename(status.file),
       state: buildDiscordState(`${status.positionString} / ${status.durationString}`),
-      largeImageKey: imageUrl,
-      largeImageText: status.file,
-      startTimestamp: playbackStartTimestamp
+      largeImageKey: imageUrl, // Thumbnail en vivo
+      largeImageText: cleanFilename(status.file),
+      smallImageKey: smallImageUrl, // Portada de AniList como ícono secundario
+      smallImageText: smallImageText,
+      startTimestamp: playbackStartTimestamp,
+      buttons: buttons
     });
 
-    Logger.info(`Reproduciendo: ${cleanFilename(status.file)} [${status.positionString}]${imageUrl ? '' : ' [SIN IMAGEN]'}`);
+    Logger.info(`[${player.name}] Reproduciendo: ${cleanFilename(status.file)} [${status.positionString}]${imageUrl ? ' [Live Thumbnail]' : ' [SIN IMAGEN]'}${anilistInfo ? ' [AniList Badge]' : ''}`);
   } else if (status.state === 'paused') {
     const now = Date.now();
-    let lastImageUrl = imgurService.getLastUrl();
-    lastState = 'paused';
-    lastPlayingTickMs = 0; // Congelar contador durante pausa
-    lastPlayingPositionMs = status.position;
-    discordService.setPausedState(true); // Notificar a Discord que está pausado
+    let lastImageUrl = uploadService.getLastUrl();
+    state.lastState = 'paused';
+    state.lastPlayingTickMs = 0; // Congelar contador durante pausa
+    state.lastPlayingPositionMs = status.position;
+    discordService.setPausedState(true);
     
-    // NO resetear timestamp al pausar - mantener el tiempo acumulado
-    
-    // Iniciar timer de pausa si no está iniciado
-    if (pausedSinceTime === 0) {
-      pausedSinceTime = now;
-      pauseRefreshCount = 0;
-      // Capturar snapshot inicial de pausa
-      const snapshot = await mpcService.getSnapshot();
-      if (snapshot) {
-        lastPausedSnapshot = await imageService.compress(snapshot);
+    // Obtener metadata de AniList
+    const parsedAnime = parseAnimeFilename(status.file);
+    let anilistInfo = null;
+    if (parsedAnime) {
+      anilistInfo = await anilistService.searchAnime(parsedAnime.title);
+    }
+
+    let smallImageUrl: string | undefined;
+    let smallImageText = status.file;
+    let buttons: Array<{ label: string; url: string }> | undefined;
+
+    if (anilistInfo) {
+      smallImageUrl = anilistInfo.coverImage.large;
+      smallImageText = anilistInfo.title.english || anilistInfo.title.romaji;
+      buttons = [{ label: 'Ver en AniList', url: anilistInfo.siteUrl }];
+      if (state.defaultButtons) {
+        for (const btn of state.defaultButtons) {
+          if (buttons.length < 2) {
+            buttons.push(btn);
+          }
+        }
+      }
+    } else {
+      if (state.defaultButtons) {
+        buttons = [...state.defaultButtons];
       }
     }
+
+    // Iniciar timer de pausa si no está iniciado
+    if (state.pausedSinceTime === 0) {
+      const snapshot = await player.getSnapshot();
+      let compressedSnapshot: Buffer | null = null;
+      if (snapshot) {
+        compressedSnapshot = await imageService.compress(snapshot);
+      }
+      state.resetForPause(now, compressedSnapshot);
+    }
     
-    // Refrescar imagen periódicamente durante pausa para mantenerla visible
-    const pausedDuration = now - pausedSinceTime;
-    const refreshNumber = Math.floor(pausedDuration / PAUSED_REFRESH_INTERVAL);
-    const needsRefresh = !lastImageUrl || refreshNumber > pauseRefreshCount;
+    // Refrescar imagen periódicamente durante pausa
+    const pausedDuration = now - state.pausedSinceTime;
+    const hasReachedPausedRefreshWindow = pausedDuration >= PAUSED_REFRESH_START_DELAY;
+    const refreshNumber = hasReachedPausedRefreshWindow
+      ? Math.floor((pausedDuration - PAUSED_REFRESH_START_DELAY) / PAUSED_REFRESH_INTERVAL) + 1
+      : 0;
+    const needsRefresh = hasReachedPausedRefreshWindow && (!lastImageUrl || refreshNumber > state.pauseRefreshCount);
     
     if (needsRefresh) {
-      // Usar el snapshot guardado de pausa (misma imagen, nueva URL para evitar cache)
-      let snapshotToUpload = lastPausedSnapshot;
+      let snapshotToUpload = state.lastPausedSnapshot;
       
-      // Si no hay snapshot guardado, capturar uno nuevo
       if (!snapshotToUpload) {
-        const snapshot = await mpcService.getSnapshot();
+        const snapshot = await player.getSnapshot();
         if (snapshot) {
           snapshotToUpload = await imageService.compress(snapshot);
-          lastPausedSnapshot = snapshotToUpload;
+          state.lastPausedSnapshot = snapshotToUpload;
         }
       }
       
       if (snapshotToUpload) {
-        const url = await imgurService.upload(snapshotToUpload, true, 'refresh durante pausa'); // Forzar subida con nueva URL
+        const url = await uploadService.upload(snapshotToUpload, true, UploadReason.PAUSED_REFRESH);
         if (url) {
           lastImageUrl = url;
-          pauseRefreshCount = refreshNumber;
-          Logger.debug(`Imagen refrescada durante pausa (#${pauseRefreshCount})`);
+          state.pauseRefreshCount = refreshNumber;
+          Logger.debug(`Imagen refrescada durante pausa (#${state.pauseRefreshCount})`);
         }
       }
     }
@@ -213,110 +406,135 @@ async function updateLoopInternal(): Promise<void> {
       details: cleanFilename(status.file),
       state: buildDiscordState(`Pausado - ${status.positionString} / ${status.durationString}`),
       largeImageKey: lastImageUrl || undefined,
-      largeImageText: status.file
+      largeImageText: cleanFilename(status.file),
+      smallImageKey: smallImageUrl,
+      smallImageText: smallImageText,
+      buttons: buttons
     });
-    Logger.info(`Pausado: ${cleanFilename(status.file)}${lastImageUrl ? '' : ' [SIN IMAGEN]'}`);
+    Logger.info(`[${player.name}] Pausado: ${cleanFilename(status.file)}${lastImageUrl ? '' : ' [SIN IMAGEN]'}${anilistInfo ? ' [AniList Badge]' : ''}`);
   } else {
-    lastState = 'stopped';
-    lastPlayingTickMs = 0;
-    lastPlayingPositionMs = 0;
+    state.lastState = 'stopped';
+    state.lastPlayingTickMs = 0;
+    state.lastPlayingPositionMs = status.position;
     discordService.setPausedState(false);
     await discordService.clearActivity();
+    historyService.endSession(); // Cerrar historial al detener
     Logger.debug('Detenido');
   }
 
-  // Verificar si necesitamos reiniciar Discord por rate limit de imágenes
+  // Verificar si necesitamos reiniciar Discord por rate limit
   await checkDiscordRestart();
 }
 
 async function restartDiscord(): Promise<void> {
   Logger.info('Reiniciando Discord para evitar rate limit de imágenes...');
+  showWindowsNotification("Reiniciando Discord", "Se reiniciará el cliente Discord para evitar el rate limit de imágenes externas.");
   
-  // Desconectar RPC primero
   discordService.disconnect();
   
-  return new Promise((resolve) => {
-    // Cerrar Discord con argumentos fijos (sin shell)
-    execFile('taskkill', ['/IM', 'Discord.exe', '/F'], (error) => {
-      if (error) {
-        Logger.warn('No se pudo cerrar Discord (puede que ya estuviera cerrado)');
+  try {
+    await execFileAsync('taskkill', ['/IM', 'Discord.exe', '/F']);
+  } catch (error) {
+    Logger.warn('No se pudo cerrar Discord (puede que ya estuviera cerrado)');
+  }
+  
+  await new Promise(resolve => setTimeout(resolve, DISCORD_KILL_DELAY_MS));
+  
+  let started = false;
+  try {
+    const localAppData = process.env.LOCALAPPDATA;
+    if (localAppData) {
+      const updateExePath = path.join(localAppData, 'Discord', 'Update.exe');
+      if (fs.existsSync(updateExePath)) {
+        const child = spawn(updateExePath, ['--processStart', 'Discord.exe'], {
+          detached: true,
+          stdio: 'ignore'
+        });
+        child.unref();
+        started = true;
       }
-      
-      // Esperar un momento y reiniciar Discord
-      setTimeout(() => {
-        let started = false;
-        try {
-          const localAppData = process.env.LOCALAPPDATA;
-          if (localAppData) {
-            const updateExePath = path.join(localAppData, 'Discord', 'Update.exe');
-            if (fs.existsSync(updateExePath)) {
-              const child = spawn(updateExePath, ['--processStart', 'Discord.exe'], {
-                detached: true,
-                stdio: 'ignore'
-              });
-              child.unref();
-              started = true;
-            }
-          }
-        } catch (startError) {
-          Logger.warn(`No se pudo iniciar Discord automáticamente: ${(startError as Error).message}`);
-        }
+    }
+  } catch (startError) {
+    Logger.warn(`No se pudo iniciar Discord automáticamente: ${(startError as Error).message}`);
+  }
 
-        if (!started) {
-          Logger.warn('No se pudo iniciar Discord automáticamente. Por favor, ábrelo manualmente.');
-        } else {
-          Logger.info('Discord reiniciado. Esperando reconexión...');
-        }
+  if (!started) {
+    Logger.warn('No se pudo iniciar Discord automáticamente. Por favor, ábrelo manualmente.');
+  } else {
+    Logger.info('Discord reiniciado. Esperando reconexión...');
+  }
 
-        (async () => {
-          // Esperar a que Discord inicie
-          await new Promise(r => setTimeout(r, 8000));
-          
-          // Reconectar RPC
-          const connected = await discordService.connect();
-          if (connected) {
-            Logger.info('Reconectado a Discord RPC después del reinicio');
-            imgurService.resetUniqueImageCount();
-          } else {
-            Logger.error('No se pudo reconectar a Discord RPC');
-          }
-          
-          resolve();
-        })();
-      }, 2000);
-    });
-  });
+  await new Promise(resolve => setTimeout(resolve, DISCORD_STARTUP_WAIT_MS));
+  
+  const connected = await discordService.connect();
+  if (connected) {
+    Logger.info('Reconectado a Discord RPC después del reinicio');
+    uploadService.resetUniqueImageCount();
+  } else {
+    Logger.error('No se pudo reconectar a Discord RPC');
+  }
 }
 
 async function checkDiscordRestart(): Promise<void> {
-  if (!autoRestartDiscord) return;
+  if (!state.autoRestartDiscord) return;
   
-  const imageCount = imgurService.getUniqueImageCount();
-  if (imageCount >= discordRestartThreshold) {
-    Logger.info(`Límite de imágenes alcanzado (${imageCount}/${discordRestartThreshold}) - reiniciando Discord`);
+  const imageCount = uploadService.getUniqueImageCount();
+  if (imageCount >= state.discordRestartThreshold) {
+    Logger.info(`Límite de imágenes alcanzado (${imageCount}/${state.discordRestartThreshold}) - reiniciando Discord`);
     await restartDiscord();
   }
 }
 
 async function updateLoop(): Promise<void> {
   try {
-    // Agregar timeout para evitar que el loop se congele
+    let timeoutId: NodeJS.Timeout | undefined;
     const timeoutPromise = new Promise<void>((_, reject) => {
-      setTimeout(() => reject(new Error('Timeout en updateLoop')), UPDATE_TIMEOUT);
+      timeoutId = setTimeout(() => reject(new Error('Timeout en updateLoop')), UPDATE_TIMEOUT);
     });
     
     await Promise.race([updateLoopInternal(), timeoutPromise]);
+    if (timeoutId) clearTimeout(timeoutId);
   } catch (error) {
     Logger.error('Error en updateLoop', error as Error);
   }
 }
 
+function startSystemTray(): void {
+  const trayScriptPath = path.join(process.cwd(), 'scripts', 'tray.ps1');
+  if (!fs.existsSync(trayScriptPath)) {
+    Logger.warn('No se encontró el script de bandeja del sistema scripts/tray.ps1');
+    return;
+  }
+
+  const logPath = Logger.getLogFilePath();
+  const historyPath = path.join(process.cwd(), 'data', 'history.json');
+
+  trayProcess = spawn('powershell', [
+    '-NoProfile',
+    '-NonInteractive',
+    '-WindowStyle',
+    'Hidden',
+    '-File',
+    trayScriptPath,
+    '-NodePid',
+    process.pid.toString(),
+    '-LogPath',
+    logPath,
+    '-HistoryPath',
+    historyPath
+  ], {
+    detached: true,
+    stdio: 'ignore'
+  });
+  trayProcess.unref();
+  Logger.info('Bandeja de sistema: Ícono iniciado en segundo plano.');
+}
+
 async function main(): Promise<void> {
   console.log('=================================');
-  console.log(' MPC-HC Discord Rich Presence');
+  console.log(' MPC Discord Rich Presence Plus');
   console.log('=================================\n');
 
-  // Cargar configuración
   let config;
   try {
     config = loadConfig();
@@ -326,85 +544,113 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Inicializar servicios
-  mpcService = new MpcHcService(config.mpc.host, config.mpc.port);
-  imgurService = new ImgurService(config.imgur.clientId, config.imgur.uploadInterval, config.discord.restartThreshold);
-  discordService = new DiscordService(config.discord.clientId);
-  imageService = new ImageService(640, 80, config.flipThumbnail, config.flipVertical); // 640px ancho, 80% calidad
+  // Inicializar reproductores soportados
+  players = [
+    new MpcHcService(config.mpc.host, config.mpc.port),
+    new MpvService(),
+    new VlcService(config.vlc.host, config.vlc.port, config.vlc.password)
+  ];
 
-  Logger.info(`Imgur: subida cada ${config.imgur.uploadInterval / 1000} segundos (${config.imgur.uploadInterval / 60000} min)`);
-  Logger.info(`Rate limit estimado: ${config.discord.restartThreshold} imágenes = ${(config.discord.restartThreshold * config.imgur.uploadInterval / 60000)} min`);
-  Logger.info('Compresión de imagen: 640px, calidad 80%');
-  if (config.flipThumbnail) {
-    Logger.info('Flip horizontal activado (fix para multi-monitor)');
+  // Inicializar servicios
+  uploadService = new UploadService(
+    config.imgur.provider,
+    config.imgur.clientId,
+    config.imgur.uploadInterval,
+    config.discord.restartThreshold,
+    config.imgur.imgbbApiKey
+  );
+  discordService = new DiscordService(config.discord.clientId, config.discord.buttons);
+  imageService = new ImageService(config.image.maxWidth, config.image.quality, config.flipThumbnail, config.flipVertical);
+  anilistService = new AnilistService(config.anilist.enabled);
+  historyService = new HistoryService();
+
+  Logger.info(`Proveedor de subida: ${config.imgur.provider}`);
+  Logger.info(`Intervalo de subida: ${config.imgur.uploadInterval / 1000} segundos`);
+  Logger.info(`Compresión de imagen: ${config.image.maxWidth}px, calidad ${config.image.quality}%`);
+  
+  state.defaultButtons = config.discord.buttons;
+  if (config.discord.buttons) {
+    Logger.info(`Botones configurados: ${config.discord.buttons.map(b => b.label).join(', ')}`);
   }
   
-  // Configurar modo de flip vertical
-  flipVerticalMode = config.flipVertical;
+  if (config.anilist.enabled) {
+    Logger.info('Enriquecimiento AniList: activado');
+  }
+  
+  state.flipVerticalMode = config.flipVertical;
   if (config.flipVertical === 'auto') {
     const monitorCount = await getActiveMonitorCount();
-    lastMonitorCount = monitorCount;
+    state.lastMonitorCount = monitorCount;
     const shouldFlip = monitorCount > 1;
     imageService.setFlipVertical(shouldFlip);
-    Logger.info(`Flip vertical: AUTO (${monitorCount} monitor${monitorCount > 1 ? 'es' : ''} - ${shouldFlip ? 'activado' : 'desactivado'})`);
+    Logger.info(`Flip vertical: AUTO (${monitorCount} monitores - ${shouldFlip ? 'activado' : 'desactivado'})`);
   } else if (config.flipVertical) {
     Logger.info('Flip vertical: activado (forzado)');
   }
   
-  // Configurar reinicio automático de Discord
-  autoRestartDiscord = config.discord.autoRestart;
-  discordRestartThreshold = config.discord.restartThreshold;
-  if (autoRestartDiscord) {
-    Logger.info(`Auto-reinicio de Discord: activado (cada ${discordRestartThreshold} imágenes)`);
+  state.autoRestartDiscord = config.discord.autoRestart;
+  state.discordRestartThreshold = config.discord.restartThreshold;
+  if (state.autoRestartDiscord) {
+    Logger.info(`Auto-reinicio de Discord: activado (cada ${state.discordRestartThreshold} imágenes)`);
   }
 
-  // Verificar conexión con MPC-HC
-  const mpcConnected = await mpcService.isConnected();
-  if (mpcConnected) {
-    Logger.info(`MPC-HC conectado en ${config.mpc.host}:${config.mpc.port}`);
-  } else {
-    Logger.warn('MPC-HC no está corriendo. Se reintentará automáticamente.');
-  }
-
-  // Conectar a Discord
   const discordConnected = await discordService.connect();
   if (!discordConnected) {
-    Logger.warn('No se pudo conectar a Discord al iniciar. Se reintentará automáticamente en el loop.');
+    Logger.warn('No se pudo conectar a Discord al iniciar. Se reintentará en el loop.');
   }
 
-  // Iniciar loop de actualización
+  // Lanzar la bandeja del sistema (System Tray Icon)
+  startSystemTray();
+
+  // Mostrar notificación de Windows al iniciar
+  showWindowsNotification("MPC Discord Presence", "La aplicación ha iniciado y está buscando reproductores en segundo plano.");
+
   Logger.info(`Actualizando cada ${config.updateInterval / 1000} segundos\n`);
-  updateIntervalMs = config.updateInterval;
-  scheduleNextUpdate(); // Iniciar el loop
+  state.updateIntervalMs = config.updateInterval;
+  scheduleNextUpdate();
 }
 
 function scheduleNextUpdate(): void {
-  if (!isRunning) return;
+  if (!state.isRunning) return;
   
   updateLoop().finally(() => {
-    if (isRunning) {
-      setTimeout(scheduleNextUpdate, updateIntervalMs);
+    if (state.isRunning) {
+      setTimeout(scheduleNextUpdate, state.updateIntervalMs);
     }
   });
 }
 
-// Graceful shutdown
-process.on('SIGINT', async () => {
-  Logger.info('\nCerrando...');
-  isRunning = false;
-  await discordService.clearActivity();
-  discordService.disconnect();
-  process.exit(0);
+async function shutdown(signal: string): Promise<void> {
+  Logger.info(`\n${signal} recibido, cerrando...`);
+  state.isRunning = false;
+  
+  // Cerrar el proceso de la bandeja del sistema
+  if (trayProcess) {
+    try {
+      process.kill(trayProcess.pid);
+    } catch {}
+  }
+  
+  try {
+    historyService.endSession(); // Guardar sesión final
+    await discordService.clearActivity();
+    discordService.disconnect();
+  } catch (error) {
+    Logger.error('Error durante shutdown', error as Error);
+  } finally {
+    Logger.close();
+    process.exit(0);
+  }
+}
+
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+
+process.on('unhandledRejection', (reason: unknown) => {
+  const message = reason instanceof Error ? reason.message : String(reason);
+  Logger.error(`Promesa no manejada: ${message}`);
 });
 
-process.on('SIGTERM', async () => {
-  isRunning = false;
-  await discordService.clearActivity();
-  discordService.disconnect();
-  process.exit(0);
-});
-
-// Ejecutar
 main().catch((error) => {
   Logger.error('Error fatal', error);
   process.exit(1);

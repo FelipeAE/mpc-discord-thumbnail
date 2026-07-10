@@ -68,19 +68,67 @@ export function loadConfig(): Config {
     );
   }
 
+  const provider = (process.env.UPLOAD_PROVIDER?.trim().toLowerCase() || 'imgur') as 'imgur' | 'catbox' | 'imgbb';
+  if (provider !== 'imgur' && provider !== 'catbox' && provider !== 'imgbb') {
+    throw new Error(`UPLOAD_PROVIDER debe ser imgur, catbox o imgbb`);
+  }
+
+  const imgurClientIdRaw = process.env.IMGUR_CLIENT_ID?.trim() || '';
+  let imgurClientId = '';
+  if (provider === 'imgur') {
+    if (!imgurClientIdRaw) {
+      throw new Error(`IMGUR_CLIENT_ID es requerida cuando UPLOAD_PROVIDER=imgur`);
+    }
+    imgurClientId = validateClientId('IMGUR_CLIENT_ID', imgurClientIdRaw);
+  } else {
+    imgurClientId = imgurClientIdRaw || 'dummy_client_id';
+  }
+
+  const imgbbApiKey = process.env.IMGBB_API_KEY?.trim();
+  if (provider === 'imgbb' && !imgbbApiKey) {
+    throw new Error(`IMGBB_API_KEY es requerida cuando UPLOAD_PROVIDER=imgbb`);
+  }
+
+  const buttons: Array<{ label: string; url: string }> = [];
+  const button1Label = process.env.BUTTON_1_LABEL?.trim();
+  const button1Url = process.env.BUTTON_1_URL?.trim();
+  if (button1Label && button1Url) {
+    buttons.push({ label: button1Label, url: button1Url });
+  }
+  const button2Label = process.env.BUTTON_2_LABEL?.trim();
+  const button2Url = process.env.BUTTON_2_URL?.trim();
+  if (button2Label && button2Url) {
+    buttons.push({ label: button2Label, url: button2Url });
+  }
+
   return {
     mpc: {
       host: mpcHost,
       port: getEnvNumber('MPC_PORT', 13579, 1, 65535)
     },
+    vlc: {
+      host: getEnvVar('VLC_HOST', 'localhost').toLowerCase(),
+      port: getEnvNumber('VLC_PORT', 8080, 1, 65535),
+      password: process.env.VLC_PASSWORD?.trim() || undefined
+    },
     imgur: {
-      clientId: validateClientId('IMGUR_CLIENT_ID', getEnvVar('IMGUR_CLIENT_ID')),
-      uploadInterval: getEnvNumber('IMGUR_UPLOAD_INTERVAL', 60000, 10000, 3600000) // 10s a 60 min
+      clientId: imgurClientId,
+      uploadInterval: getEnvNumber('IMGUR_UPLOAD_INTERVAL', 75000, 10000, 3600000), // 10s a 60 min
+      provider,
+      imgbbApiKey
     },
     discord: {
       clientId: validateClientId('DISCORD_CLIENT_ID', getEnvVar('DISCORD_CLIENT_ID')),
       autoRestart: getEnvBoolean('AUTO_RESTART_DISCORD', false),
-      restartThreshold: getEnvNumber('DISCORD_RESTART_THRESHOLD', 60, 1, 10000) // Reiniciar después de X imágenes únicas
+      restartThreshold: getEnvNumber('DISCORD_RESTART_THRESHOLD', 60, 1, 10000), // Reiniciar después de X imágenes únicas
+      buttons: buttons.length > 0 ? buttons : undefined
+    },
+    image: {
+      maxWidth: getEnvNumber('IMAGE_MAX_WIDTH', 640, 100, 2000),
+      quality: getEnvNumber('IMAGE_JPEG_QUALITY', 80, 1, 100)
+    },
+    anilist: {
+      enabled: getEnvBoolean('ENABLE_ANILIST', true)
     },
     updateInterval: getEnvNumber('UPDATE_INTERVAL', 15000, 5000, 300000),
     flipThumbnail: getEnvBoolean('FLIP_THUMBNAIL', false), // Fix para imagen espejada

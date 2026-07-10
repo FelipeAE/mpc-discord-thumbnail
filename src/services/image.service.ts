@@ -82,4 +82,22 @@ export class ImageService {
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
     return `${(bytes / (1024 * 1024)).toFixed(2)}MB`;
   }
+
+  /**
+   * Calcula el brillo promedio de una imagen
+   * @param imageBuffer - Buffer de la imagen
+   * @returns Brillo promedio (0-255)
+   */
+  async getBrightness(imageBuffer: Buffer): Promise<number> {
+    try {
+      const stats = await sharp(imageBuffer).stats();
+      const channels = stats.channels;
+      if (channels.length >= 3) {
+        return (channels[0].mean + channels[1].mean + channels[2].mean) / 3;
+      }
+      return channels[0].mean;
+    } catch (e) {
+      return 128;
+    }
+  }
 }

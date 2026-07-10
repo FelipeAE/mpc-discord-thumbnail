@@ -4,3 +4,7 @@ dist/
 logs/
 *.log
 .DS_Store
+.agents/
+.claude/
+data/
+

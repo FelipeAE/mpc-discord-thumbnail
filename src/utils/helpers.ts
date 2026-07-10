@@ -85,9 +85,12 @@ export function cleanFilename(filename: string): string {
   cleaned = cleaned.replace(/^\[[^\]]+\]\s*/, '');
 
   // Detectar formato scene (puntos como separadores con patrón SxxExx)
-  const sceneMatch = cleaned.match(/^(.+?)\.(S\d{2}E\d{2})\.(.+?)\.(\d{3,4}p|WEB|HDTV|BluRay)/i);
+  // Soporta: Show.Name.S01E05.Title.1080p.WEB.mkv, Show.Name.2024.S01E05.PROPER.mkv, etc.
+  const sceneMatch = cleaned.match(/^(.+?)\.(S\d{2}E\d{2})\.(.+?)\.(\d{3,4}p|WEB[-.]?DL|WEB[-.]?Rip|WEBRip|HDTV|BluRay|BDRip|AMZN|NF|DSNP|ATVP|HMAX|PROPER|REPACK|INTERNAL|DDP?\d|AAC|H\.?26[45]|x26[45]|HEVC|AVC|10bit)/i);
   if (sceneMatch) {
-    const showName = sceneMatch[1].replace(/\./g, ' ');
+    let showName = sceneMatch[1].replace(/\./g, ' ');
+    // Remover año trailing del nombre del show si existe (ej: "Show Name 2024")
+    showName = showName.replace(/\s+\d{4}$/, '');
     const episode = sceneMatch[2].toUpperCase();
     const episodeTitle = sceneMatch[3].replace(/\./g, ' ');
     cleaned = `${showName} - ${episode} - ${episodeTitle}`;
@@ -107,3 +110,57 @@ export function cleanFilename(filename: string): string {
   // Limitar longitud para Discord (128 chars max para details)
   return cleaned.length > 100 ? cleaned.substring(0, 97) + '...' : cleaned;
 }
+
+/**
+ * Parsea el nombre del archivo para extraer el título de la serie y el número de episodio.
+ * Útil para consultar APIs de metadata (como AniList).
+ */
+export function parseAnimeFilename(filename: string): { title: string; episode?: number } | null {
+  // Remover extensión
+  let cleaned = filename.replace(/\.[^/.]+$/, '');
+
+  // Remover grupo/fansub al inicio: [Erai-raws], [SubsPlease], etc.
+  cleaned = cleaned.replace(/^\[[^\]]+\]\s*/, '');
+
+  // Caso 1: Formato scene (puntos como separadores con patrón SxxExx)
+  const sceneMatch = cleaned.match(/^(.+?)\.(S\d{2}E\d{2})\.(.+?)\.(\d{3,4}p|WEB[-.]?DL|WEB[-.]?Rip|WEBRip|HDTV|BluRay|BDRip|AMZN|NF|DSNP|ATVP|HMAX|PROPER|REPACK|INTERNAL|DDP?\d|AAC|H\.?26[45]|x26[45]|HEVC|AVC|10bit)/i);
+  if (sceneMatch) {
+    let showName = sceneMatch[1].replace(/\./g, ' ');
+    showName = showName.replace(/\s+\d{4}$/, '').trim();
+    const episodeString = sceneMatch[2].match(/E(\d+)/i)?.[1];
+    const episode = episodeString ? parseInt(episodeString, 10) : undefined;
+    return { title: showName, episode };
+  }
+
+  // Caso 2: Formato tradicional (removiendo tags técnicos al final)
+  let previous = '';
+  while (previous !== cleaned) {
+    previous = cleaned;
+    cleaned = cleaned.replace(/\s*[\[\(][^\[\]()]*[\]\)]\s*$/, '');
+  }
+
+  // Patrones comunes para buscar el número de episodio
+  const episodePatterns = [
+    /\s+-\s+Episode\s+(\d+)\s*$/i,
+    /\s+-\s+(\d+)\s*$/,
+    /\s+Episode\s+(\d+)\s*$/i,
+    /\s+Ep\s+(\d+)\s*$/i,
+    /\s+(\d+)\s*$/
+  ];
+
+  for (const pattern of episodePatterns) {
+    const match = cleaned.match(pattern);
+    if (match) {
+      const episode = parseInt(match[1], 10);
+      let title = cleaned.replace(pattern, '').trim();
+      title = title.replace(/\s*-\s*$/, '').trim(); // Eliminar guión trailing si existe
+      if (title.length > 0) {
+        return { title, episode };
+      }
+    }
+  }
+
+  const trimmed = cleaned.trim();
+  return trimmed.length > 0 ? { title: trimmed } : null;
+}
+

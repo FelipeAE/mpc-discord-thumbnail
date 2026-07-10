@@ -9,6 +9,7 @@ export interface ActivityOptions {
   smallImageKey?: string;
   smallImageText?: string;
   startTimestamp?: number;
+  buttons?: Array<{ label: string; url: string }>;
 }
 
 export class DiscordService {
@@ -20,15 +21,21 @@ export class DiscordService {
   private activityCount: number = 0; // Contador de actualizaciones desde última reconexión
   private pausedSince: number = 0; // Timestamp de cuando empezó la pausa
   private activityActive: boolean = false; // Rastrear si hay una actividad activa en Discord
+  private defaultButtons?: Array<{ label: string; url: string }>;
   private readonly RECONNECT_INTERVAL = 1800000; // 30 minutos máximo sin reconectar
   private readonly RECONNECT_ACTIVITY_COUNT = 50; // Reconectar cada 50 actualizaciones (~8 min a 10s/update)
   private readonly PAUSED_RECONNECT_INTERVAL = 300000; // 5 minutos - reconectar más seguido si está pausado
   private readonly DISCORD_TEXT_LIMIT = 128;
 
-  constructor(clientId: string) {
+  constructor(clientId: string, defaultButtons?: Array<{ label: string; url: string }>) {
     this.clientId = clientId;
+    this.defaultButtons = defaultButtons;
     this.client = new Client({ clientId });
 
+    this.setupListeners();
+  }
+
+  private setupListeners(): void {
     this.client.on('ready', () => {
       Logger.info('Conectado a Discord RPC');
       this.connected = true;
@@ -92,14 +99,7 @@ export class DiscordService {
     this.lastReconnectTime = Date.now(); // Reset tiempo
     this.client = new Client({ clientId: this.clientId });
     
-    this.client.on('ready', () => {
-      this.connected = true;
-      this.lastSuccessfulUpdate = Date.now();
-    });
-
-    this.client.on('disconnected', () => {
-      this.connected = false;
-    });
+    this.setupListeners();
 
     return await this.connect();
   }
@@ -108,13 +108,16 @@ export class DiscordService {
    * Conecta al cliente de Discord con timeout
    */
   async connect(): Promise<boolean> {
+    let timeoutId: NodeJS.Timeout | undefined;
     try {
       const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error('Timeout conectando a Discord')), 5000);
+        timeoutId = setTimeout(() => reject(new Error('Timeout conectando a Discord')), 5000);
       });
       await Promise.race([this.client.login(), timeoutPromise]);
+      if (timeoutId) clearTimeout(timeoutId);
       return true;
     } catch (error) {
+      if (timeoutId) clearTimeout(timeoutId);
       Logger.error('Error al conectar con Discord', error as Error);
       this.connected = false;
       return false;
@@ -142,20 +145,29 @@ export class DiscordService {
     }
 
     try {
+      if (!this.client.user) {
+        Logger.warn('Discord RPC user no disponible; marcando desconectado para reintentar');
+        this.connected = false;
+        this.activityActive = false;
+        return;
+      }
+
       const details = this.truncateForDiscord(options.details);
       const state = this.truncateForDiscord(options.state);
       const largeImageText = this.truncateForDiscord(options.largeImageText || options.details);
       const smallImageText = this.truncateForDiscord(options.smallImageText);
+      const buttons = options.buttons || this.defaultButtons;
 
       Logger.debug(`Discord: enviando imagen ${options.largeImageKey || 'ninguna'}`);
-      const result = await this.client.user?.setActivity({
+      const result = await this.client.user.setActivity({
         details,
         state,
         largeImageKey: options.largeImageKey,
         largeImageText,
         smallImageKey: options.smallImageKey,
         smallImageText,
-        startTimestamp: options.startTimestamp
+        startTimestamp: options.startTimestamp,
+        buttons: buttons && buttons.length > 0 ? buttons : undefined
       });
       this.lastSuccessfulUpdate = Date.now();
       this.activityActive = true;
@@ -180,6 +192,7 @@ export class DiscordService {
     } catch (error) {
       Logger.error('Error al establecer actividad en Discord', error as Error);
       this.connected = false; // Marcar como desconectado para reintentar
+      this.activityActive = false;
     }
   }
 
@@ -214,8 +227,14 @@ export class DiscordService {
    * Desconecta del cliente Discord
    */
   disconnect(): void {
-    this.client.destroy();
+    try {
+      this.client.destroy();
+    } catch (e) {
+      // Ignorar errores si el cliente ya está destruido
+    }
     this.connected = false;
+    this.activityActive = false;
+    this.pausedSince = 0;
   }
 
   /**
@@ -227,8 +246,10 @@ export class DiscordService {
 
   private truncateForDiscord(text?: string): string | undefined {
     if (!text) return undefined;
-    return text.length > this.DISCORD_TEXT_LIMIT
-      ? `${text.substring(0, this.DISCORD_TEXT_LIMIT - 3)}...`
-      : text;
+    // Discord requiere mínimo 2 caracteres para details/state
+    const padded = text.length < 2 ? text.padEnd(2, ' ') : text;
+    return padded.length > this.DISCORD_TEXT_LIMIT
+      ? `${padded.substring(0, this.DISCORD_TEXT_LIMIT - 3)}...`
+      : padded;
   }
 }

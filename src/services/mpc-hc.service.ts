@@ -1,9 +1,10 @@
 import axios from 'axios';
-import { MpcStatus } from '../types';
+import { PlayerStatus, PlayerService } from '../types';
 import { parseMpcVariables, formatTime } from '../utils/helpers';
 import Logger from '../utils/logger';
 
-export class MpcHcService {
+export class MpcHcService implements PlayerService {
+  name = 'MPC-HC';
   private baseUrl: string;
 
   constructor(host: string, port: number) {
@@ -13,7 +14,7 @@ export class MpcHcService {
   /**
    * Obtiene el estado actual de MPC-HC
    */
-  async getStatus(): Promise<MpcStatus | null> {
+  async getStatus(): Promise<PlayerStatus | null> {
     try {
       const response = await axios.get(`${this.baseUrl}/variables.html`, {
         timeout: 5000
@@ -57,7 +58,7 @@ export class MpcHcService {
 
       return Buffer.from(response.data);
     } catch (error) {
-      Logger.error('Error al capturar snapshot');
+      Logger.error('Error al capturar snapshot', error as Error);
       return null;
     }
   }

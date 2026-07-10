@@ -14,6 +14,7 @@ class Logger {
   private static currentLogFile: string = '';
   private static initialized: boolean = false;
   private static maxLogDays: number = 7; // Mantener logs de los últimos 7 días
+  private static writeStream: fs.WriteStream | null = null;
 
   private static getDateString(): string {
     const now = new Date();
@@ -36,12 +37,20 @@ class Logger {
       this.currentDate = today;
       this.currentLogFile = path.join(this.logsDir, `app-${today}.log`);
       this.initialized = false;
+      // Cerrar stream anterior si existe (rotación de día)
+      if (this.writeStream) {
+        this.writeStream.end();
+        this.writeStream = null;
+      }
     }
 
     if (!this.initialized) {
+      // Crear WriteStream en modo append
+      this.writeStream = fs.createWriteStream(this.currentLogFile, { flags: 'a' });
+
       // Agregar separador al inicio de cada sesión
       const separator = `\n${'='.repeat(50)}\n[SESIÓN INICIADA: ${new Date().toLocaleString('es-CL')}]\n${'='.repeat(50)}\n`;
-      fs.appendFileSync(this.currentLogFile, separator);
+      this.writeStream.write(separator);
       this.initialized = true;
 
       // Limpiar logs antiguos
@@ -90,20 +99,23 @@ class Logger {
       );
   }
 
-  private static writeToFile(level: LogLevel, message: string): void {
+  private static writeToFile(logLine: string): void {
     this.init();
-    const sanitizedMessage = this.sanitizeMessage(message);
-    const logLine = `[${this.formatDateTime()}] [${level}] ${sanitizedMessage}\n`;
-    fs.appendFileSync(this.currentLogFile, logLine);
+    if (this.writeStream) {
+      this.writeStream.write(logLine);
+    }
   }
 
   private static log(level: LogLevel, message: string): void {
+    // Sanitizar una sola vez
     const sanitizedMessage = this.sanitizeMessage(message);
     const time = this.formatTime();
+    const dateTime = this.formatDateTime();
     const prefix = `[${time}] [${level}]`;
 
-    // Escribir a archivo
-    this.writeToFile(level, sanitizedMessage);
+    // Escribir a archivo (ya sanitizado)
+    const logLine = `[${dateTime}] [${level}] ${sanitizedMessage}\n`;
+    this.writeToFile(logLine);
 
     // Escribir a consola
     switch (level) {
@@ -136,6 +148,24 @@ class Logger {
 
   static warn(message: string): void {
     this.log(LogLevel.WARN, message);
+  }
+
+  static getLogFilePath(): string {
+    this.init();
+    return this.currentLogFile;
+  }
+
+  static close(): void {
+    if (this.writeStream) {
+      try {
+        const separator = `\n${'='.repeat(50)}\n[SESIÓN FINALIZADA: ${new Date().toLocaleString('es-CL')}]\n${'='.repeat(50)}\n`;
+        this.writeStream.write(separator);
+        this.writeStream.end();
+        this.writeStream = null;
+      } catch (error) {
+        // Silenciar errores de cierre
+      }
+    }
   }
 }
 
