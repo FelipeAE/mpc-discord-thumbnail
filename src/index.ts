@@ -7,7 +7,7 @@ import { DiscordService } from './services/discord.service';
 import { ImageService } from './services/image.service';
 import { AnilistService } from './services/anilist.service';
 import { HistoryService } from './services/history.service';
-import { cleanFilename, getActiveMonitorCount, parseAnimeFilename } from './utils/helpers';
+import { cleanFilename, getActiveMonitorCount, parseAnimeFilename, getMpcRendererInfo } from './utils/helpers';
 import { showWindowsNotification } from './utils/notifier';
 import Logger from './utils/logger';
 import { execFile, spawn } from 'child_process';
@@ -43,6 +43,9 @@ class AppState {
   autoRestartDiscord: boolean = false;
   discordRestartThreshold: number = 60;
   defaultButtons?: Array<{ label: string; url: string }>;
+  
+  // Para detección de renderer
+  lastDetectedRenderer: string = '';
   
   // Para detección automática de monitores
   flipVerticalMode: boolean | 'auto' = 'auto';
@@ -152,6 +155,19 @@ async function checkMonitorFlip(): Promise<void> {
   if (now - state.lastMonitorCheck < MONITOR_CHECK_INTERVAL) return;
   state.lastMonitorCheck = now;
   
+  // Prioridad 1: Detectar renderer de MPC-HC
+  const renderer = await getMpcRendererInfo();
+  if (renderer) {
+    imageService.setFlipVertical(renderer.needsFlipVertical);
+    imageService.setFlipHorizontal(renderer.needsFlipHorizontal);
+    if (renderer.name !== state.lastDetectedRenderer) {
+      state.lastDetectedRenderer = renderer.name;
+      Logger.info(`Renderer detectado: ${renderer.name} (${renderer.value}) - Flip H: ${renderer.needsFlipHorizontal}, Flip V: ${renderer.needsFlipVertical}`);
+    }
+    return;
+  }
+  
+  // Fallback: Detección por monitores (comportamiento anterior)
   const monitorCount = await getActiveMonitorCount();
   if (monitorCount !== state.lastMonitorCount) {
     state.lastMonitorCount = monitorCount;
@@ -579,11 +595,21 @@ async function main(): Promise<void> {
   
   state.flipVerticalMode = config.flipVertical;
   if (config.flipVertical === 'auto') {
-    const monitorCount = await getActiveMonitorCount();
-    state.lastMonitorCount = monitorCount;
-    const shouldFlip = monitorCount > 1;
-    imageService.setFlipVertical(shouldFlip);
-    Logger.info(`Flip vertical: AUTO (${monitorCount} monitores - ${shouldFlip ? 'activado' : 'desactivado'})`);
+    // Intentar detectar renderer primero
+    const renderer = await getMpcRendererInfo();
+    if (renderer) {
+      imageService.setFlipVertical(renderer.needsFlipVertical);
+      imageService.setFlipHorizontal(renderer.needsFlipHorizontal);
+      state.lastDetectedRenderer = renderer.name;
+      Logger.info(`Renderer MPC-HC: ${renderer.name} - Flip auto: H=${renderer.needsFlipHorizontal}, V=${renderer.needsFlipVertical}`);
+    } else {
+      // Fallback: detección de monitores
+      const monitorCount = await getActiveMonitorCount();
+      state.lastMonitorCount = monitorCount;
+      const shouldFlip = monitorCount > 1;
+      imageService.setFlipVertical(shouldFlip);
+      Logger.info(`Flip vertical: AUTO (${monitorCount} monitores - ${shouldFlip ? 'activado' : 'desactivado'})`);
+    }
   } else if (config.flipVertical) {
     Logger.info('Flip vertical: activado (forzado)');
   }

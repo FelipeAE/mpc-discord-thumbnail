@@ -164,3 +164,65 @@ export function parseAnimeFilename(filename: string): { title: string; episode?:
   return trimmed.length > 0 ? { title: trimmed } : null;
 }
 
+/** Información del renderer detectado */
+export interface MpcRendererInfo {
+  name: string;
+  value: number;
+  needsFlipHorizontal: boolean;
+  needsFlipVertical: boolean;
+}
+
+/**
+ * Detecta el renderizador de video configurado en MPC-HC (Windows Registry)
+ * Lee HKCU\Software\MPC-HC\MPC-HC\Settings\DSVidRen
+ */
+export async function getMpcRendererInfo(): Promise<MpcRendererInfo | null> {
+  return new Promise((resolve) => {
+    execFile(
+      'reg',
+      ['query', 'HKCU\\Software\\MPC-HC\\MPC-HC\\Settings', '/v', 'DSVidRen'],
+      { timeout: 5000, windowsHide: true },
+      (error, stdout) => {
+        if (error) {
+          resolve(null);
+          return;
+        }
+        const match = stdout.match(/DSVidRen\s+REG_DWORD\s+0x([0-9a-fA-F]+)/);
+        if (!match) {
+          resolve(null);
+          return;
+        }
+        const value = parseInt(match[1], 16);
+        
+        // Enum VIDRNDT del código fuente de MPC-HC (clsid2/mpc-hc)
+        const rendererMap: Record<number, string> = {
+          0: 'System Default',
+          2: 'Overlay Mixer',
+          4: 'VMR9 Windowed',
+          6: 'VMR9 Renderless',
+          7: 'DXR',
+          8: 'Null (compressed)',
+          9: 'Null (uncompressed)',
+          10: 'EVR',
+          11: 'EVR Custom Presenter',
+          12: 'madVR',
+          13: 'Sync Renderer',
+          14: 'MPC Video Renderer',
+        };
+        
+        const name = rendererMap[value] || `Unknown (${value})`;
+        // MPCVR produce snapshots girados en ambos ejes
+        const isMpcvr = value === 14;
+        
+        resolve({
+          name,
+          value,
+          needsFlipHorizontal: isMpcvr,
+          needsFlipVertical: isMpcvr,
+        });
+      }
+    );
+  });
+}
+
+

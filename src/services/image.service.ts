@@ -29,6 +29,13 @@ export class ImageService {
     }
   }
 
+  /**
+   * Actualiza el estado de flip horizontal (para detección automática de renderer)
+   */
+  setFlipHorizontal(flip: boolean): void {
+    this.flipHorizontal = flip;
+  }
+
   private currentFlipVertical: boolean = false;
 
   /**
