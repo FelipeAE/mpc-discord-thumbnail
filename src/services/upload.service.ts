@@ -123,23 +123,29 @@ export class UploadService {
           deleteHash = response.data.data.deletehash;
         }
       } else if (this.provider === 'catbox') {
-        const form = new FormData();
-        form.append('reqtype', 'fileupload');
-        form.append('fileToUpload', imageBuffer, { filename: 'snapshot.jpg', contentType: 'image/jpeg' });
+        try {
+          const form = new FormData();
+          form.append('reqtype', 'fileupload');
+          form.append('fileToUpload', imageBuffer, { filename: 'snapshot.jpg', contentType: 'image/jpeg' });
 
-        const response = await axios.post<string>(
-          'https://catbox.moe/user/api.php',
-          form,
-          {
-            headers: form.getHeaders(),
-            timeout: 30000
+          const response = await axios.post<string>(
+            'https://catbox.moe/user/api.php',
+            form,
+            {
+              headers: form.getHeaders(),
+              timeout: 30000
+            }
+          );
+
+          if (response.data && response.data.startsWith('https://')) {
+            uploadedUrl = response.data.trim();
+          } else {
+            throw new Error(`Respuesta inválida de Catbox: ${response.data}`);
           }
-        );
-
-        if (response.data && response.data.startsWith('https://')) {
-          uploadedUrl = response.data.trim();
-        } else {
-          throw new Error(`Respuesta inválida de Catbox: ${response.data}`);
+        } catch (catboxError) {
+          Logger.warn(`Catbox falló: ${(catboxError as Error).message}. Activando fallback permanente a Imgur...`);
+          this.provider = 'imgur';
+          return this.upload(imageBuffer, forceUpload, reason);
         }
       } else if (this.provider === 'imgbb') {
         if (!this.imgbbApiKey) {
